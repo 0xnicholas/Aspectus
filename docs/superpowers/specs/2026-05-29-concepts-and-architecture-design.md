@@ -27,12 +27,14 @@
 属于某个 Tenant 的**程序化**身份，代表自动化系统。
 
 - **身份属性**：label、description（无 email，无 password）
-- **认证方式**：API Key（唯一方式），OAuth2 Client Credentials（Phase 3+）
+- **认证方式**：API Key（Phase 1+），OAuth2 Client Credentials（Phase 3+）
 - **授权模型**：scopes 直接绑定（不使用 Role）
-- **生命周期**：通过 API 或管理员创建，可设 expires_at
+- **生命周期**：通过 API 或管理员创建，可设 expires_at（账号级过期，过期后所有关联 API Key 自动失效）
 - **审计语义**：actor = 系统/流水线，非个人
 
 **关键区别：User 和 Service Account 是两个独立概念，不合并。** 合并会导致语义歧义（audit log 不可追责）、数据污染（大量 null 字段）、安全边界模糊（密码重置 vs API Key 轮转流程不同）、授权模型混乱（Role 对人类有意义，机器只需精确 scope）。
+
+**Phase 1 范围**：Phase 1（MVP）仅包含 Service Account + API Key。User 表结构和 OAuth2 认证属于 Phase 3。Phase 1 的 `/introspect` 只处理 API Key 类型的 subject token。
 
 ### API Key
 
@@ -49,9 +51,12 @@
 
 - **Scope 格式**：`{project}:{resource}:{action}`，支持 `*` 通配符
   - 例：`pandaria:session:*`（Pandaria session 的所有操作）、`tavern:workflow:run`
-- **Role**：全局定义（非 per-tenant）的 scope 命名集合
-  - 例：`agent-developer = [pandaria:*, tavern:*]`
-- **User** 通过 Role 获得 scopes；**Service Account** 直接绑定 scopes
+- **Role**：全局定义（非 per-tenant）的 scope 命名集合，每个 Role 标记适用的身份类型
+  - `role_type`：`"user"` | `"service_account"` | `"both"` — 约束该 Role 可被赋予哪种身份
+  - 例：`agent-developer` (type: user) = `[pandaria:*, tavern:*]`
+  - 例：`ci-deployer` (type: service_account) = `[pandaria:session:create]`
+  - DB 层强制：User 只能被赋予 `user` 或 `both` 类型的 Role；Service Account 同理
+- **User** 通过 Role 获得 scopes；**Service Account** 直接绑定 scopes（不使用 Role）
 
 ### Project
 
@@ -69,6 +74,14 @@
 ### Service Token
 
 各项目调用 `/introspect` 时使用的内部认证 token。与 subject token（用户/服务账号的 token）是**两个独立概念**。Service Token 仅用于认证调用方身份，不被自省。
+
+### AuditLog（审计日志）
+
+不可变的操作记录，append-only（无 UPDATE/DELETE）。
+
+- **记录内容**：tenant_id、actor_id（User 或 Service Account）、action、target、metadata、timestamp
+- **敏感操作必须记录**：API Key 创建/吊销、Token 签发、配额变更
+- **安全约束**：密钥不得出现在日志中（API Key 原文、JWT signature、用户密码禁止记录）
 
 ### Quota
 
@@ -178,7 +191,7 @@ token={subject_token}
 | Quota 返回 | 含 used 数据 | 仅返回 limit |
 | JWT 吊销 | 未细说 | Redis 吊销集合 + 短有效期 |
 | client_id 语义 | 未明确定义 | = token 被签发到的目标 Project |
-| Role | 未明确 per-tenant vs 全局 | 全局定义 |
+| Role | 未明确 per-tenant vs 全局 | 全局定义，含 role_type 约束 |
 | Project | 未明确 enum vs 动态 | enum（硬编码） |
 
 ---
@@ -189,7 +202,7 @@ token={subject_token}
 
 - 具体数据库 schema（表结构、索引）
 - API Key 格式细节（前缀、长度、编码）
-- 具体 Role 定义（有哪些 role，各自包含哪些 scopes）
+- 具体 Role 定义（有哪些 role，各自 role_type 和 scopes）
 - Rust crate 结构
 - 迁移脚本
 - Phase 1 MVP 的具体 API 列表
