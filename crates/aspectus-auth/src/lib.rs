@@ -131,6 +131,11 @@ impl ApiKeyVerifier {
         self.cache.del(&format!("introspect:{key_hash}")).await;
     }
 
+    /// Health check for the Redis cache.
+    pub async fn cache_health(&self) -> Result<(), String> {
+        self.cache.ping().await
+    }
+
     pub async fn verify(&self, token: &str) -> IntrospectResponse {
         let raw = match extract_raw_from_key(token) {
             Some(r) => r,

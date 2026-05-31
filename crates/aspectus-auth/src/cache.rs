@@ -71,4 +71,11 @@ impl RedisCache {
         let mut conn = self.conn();
         let _: Result<(), _> = redis::cmd("DEL").arg(key).query_async(&mut conn).await;
     }
+
+    /// Health check — ping the Redis server.
+    pub async fn ping(&self) -> Result<(), String> {
+        let mut conn = self.conn();
+        let result: redis::RedisResult<String> = redis::cmd("PING").query_async(&mut conn).await;
+        result.map(|_| ()).map_err(|e| e.to_string())
+    }
 }

@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -54,6 +54,17 @@ pub async fn create(
             (StatusCode::CREATED, Json(sa)).into_response()
         }
         Err(e) => ProblemDetails::from(e).into_response(),
+    }
+}
+
+pub async fn get(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.service_account_store.get_by_id(&id).await {
+        Ok(Some(sa)) => Json(sa).into_response(),
+        Ok(None) => ProblemDetails::not_found(format!("ServiceAccount {id} not found")).into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
     }
 }
 

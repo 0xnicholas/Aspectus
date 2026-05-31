@@ -10,6 +10,7 @@ use aspectus_core::store::TenantStore;
 pub struct IntrospectForm {
     token: String,
     #[serde(default)]
+    #[allow(dead_code)]
     token_type_hint: Option<String>,
 }
 

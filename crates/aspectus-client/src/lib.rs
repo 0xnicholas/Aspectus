@@ -24,7 +24,9 @@ pub struct IntrospectRequest {
 /// v0.2.0: Full reqwest-based HTTP implementation.
 #[derive(Debug, Clone)]
 pub struct AspectusClient {
+    #[allow(dead_code)]
     base_url: String,
+    #[allow(dead_code)]
     service_token: String,
     // client: reqwest::Client  (v0.2.0+)
 }

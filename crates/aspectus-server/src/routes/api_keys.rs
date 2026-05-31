@@ -116,6 +116,17 @@ pub async fn create(
     }
 }
 
+pub async fn get(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match state.api_key_store.find_by_id(&id).await {
+        Ok(Some(key)) => Json(key).into_response(),
+        Ok(None) => ProblemDetails::not_found(format!("ApiKey {id} not found")).into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+    }
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,

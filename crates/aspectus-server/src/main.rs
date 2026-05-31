@@ -78,11 +78,13 @@ async fn main() -> anyhow::Result<()> {
             post(aspectus_server::routes::service_accounts::create)
                 .get(aspectus_server::routes::service_accounts::list),
         )
+        .route("/service-accounts/{id}", get(aspectus_server::routes::service_accounts::get))
         .route(
             "/api-keys",
             post(aspectus_server::routes::api_keys::create)
                 .get(aspectus_server::routes::api_keys::list),
         )
+        .route("/api-keys/{id}", get(aspectus_server::routes::api_keys::get))
         .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
         .layer(auth_layer.clone())
         .with_state(state.clone());
@@ -90,10 +92,10 @@ async fn main() -> anyhow::Result<()> {
     // Main router
     let app = Router::new()
         .route("/introspect", post(aspectus_server::routes::introspect::handle))
+        .route("/health", get(aspectus_server::routes::health::handle))
         .route_layer(auth_layer)
         .with_state(state)
         .merge(mgmt)
-        .route("/health", get(|| async { "ok" }))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 

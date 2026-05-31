@@ -1,6 +1,6 @@
 //! Aspectus HTTP server.
 //!
-//! axum-based HTTP service providing the `/introspect` endpoint (v0.2.0+),
+//! axum-based HTTP service providing the `/introspect` endpoint,
 //! management APIs, and the `/health` endpoint.
 
 pub mod config;
@@ -12,9 +12,7 @@ pub mod routes;
 use std::sync::Arc;
 
 use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier};
-use db::{
-    PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore,
-};
+use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore};
 
 /// Shared application state passed to all handlers via axum `State`.
 #[derive(Clone)]
