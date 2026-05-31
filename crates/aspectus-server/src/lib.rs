@@ -8,6 +8,7 @@ pub mod db;
 pub mod error;
 pub mod middleware;
 pub mod routes;
+pub mod util;
 
 use std::sync::Arc;
 

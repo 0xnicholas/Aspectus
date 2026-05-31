@@ -15,6 +15,7 @@ use aspectus_core::{
 };
 
 use crate::error::ProblemDetails;
+use crate::util::generate_id;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -88,10 +89,4 @@ pub async fn update_quotas(
         Ok(_) => ProblemDetails::not_found("Tenant not found").into_response(),
         Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
     }
-}
-
-fn generate_id() -> String {
-    let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).expect("RNG failure");
-    hex::encode(&bytes)[..21].to_string()
 }

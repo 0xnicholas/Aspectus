@@ -60,10 +60,13 @@ fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
     }
 }
 
+
+/// Generate a random 21-char hex ID. Returns empty string on RNG failure.
 fn generate_id() -> String {
     let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).expect("RNG failure");
-    hex::encode(&bytes)[..21].to_string()
+    getrandom::getrandom(&mut bytes)
+        .map(|_| hex::encode(&bytes)[..21].to_string())
+        .unwrap_or_default()
 }
 
 // ---- ApiKeyCreator ----

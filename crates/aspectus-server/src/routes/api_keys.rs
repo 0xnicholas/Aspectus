@@ -16,6 +16,7 @@ use aspectus_core::{
 };
 
 use crate::error::ProblemDetails;
+use crate::util::generate_id;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -121,9 +122,24 @@ pub async fn get(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     match state.api_key_store.find_by_id(&id).await {
-        Ok(Some(key)) => Json(key).into_response(),
+        Ok(Some(key)) => {
+            let item = aspectus_core::api_key::ApiKeyListItem {
+                id: key.id,
+                service_account_id: key.service_account_id,
+                project: key.project,
+                key_prefix: key.key_prefix,
+                scopes: key.scopes,
+                expires_at: key.expires_at,
+                revoked_at: key.revoked_at,
+                created_at: key.created_at,
+            };
+            Json(item).into_response()
+        }
         Ok(None) => ProblemDetails::not_found(format!("ApiKey {id} not found")).into_response(),
-        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to get API key");
+            ProblemDetails::internal_error("An internal error occurred").into_response()
+        }
     }
 }
 
@@ -145,22 +161,20 @@ pub async fn revoke(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    // Look up the key to get its hash for cache invalidation and tenant for audit
-    let (key_hash, tenant_id) = match state.api_key_store.find_by_id(&id).await {
-        Ok(Some(key)) => (Some(key.key_hash), key.tenant_id),
-        _ => (None, String::new()),
+    // Look up the key for cache invalidation and tenant for audit
+    let key = match state.api_key_store.find_by_id(&id).await {
+        Ok(Some(key)) => key,
+        _ => return ProblemDetails::not_found(format!("ApiKey {id} not found")).into_response(),
     };
 
     match state.api_key_store.revoke(&id).await {
         Ok(true) => {
             // Invalidate Redis cache so next introspect hits PostgreSQL
-            if let Some(hash) = &key_hash {
-                state.api_key_verifier.invalidate_cache(hash).await;
-            }
+            state.api_key_verifier.invalidate_cache(&key.key_hash).await;
 
             let _ = state.audit_log_store.append(AuditLog {
                 id: generate_id(),
-                tenant_id: tenant_id.clone(),
+                tenant_id: key.tenant_id.clone(),
                 actor_id: "mgmt".into(),
                 actor_type: IdentityType::ServiceAccount,
                 action: "api_key.revoked".into(),
@@ -176,12 +190,9 @@ pub async fn revoke(
             ProblemDetails::not_found(format!("ApiKey {id} not found or already revoked"))
                 .into_response()
         }
-        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to revoke API key");
+            ProblemDetails::internal_error("An internal error occurred").into_response()
+        }
     }
-}
-
-fn generate_id() -> String {
-    let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).expect("RNG failure");
-    hex::encode(&bytes)[..21].to_string()
 }

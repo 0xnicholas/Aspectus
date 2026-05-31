@@ -1,18 +1,17 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{middleware, Router, routing::{delete, get, post, put}};
+use axum::{middleware, Router, extract::DefaultBodyLimit, routing::{delete, get, post, put}};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier};
+use aspectus_server::config::Config;
+use aspectus_server::db;
 use aspectus_server::db::{
     PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore,
 };
-
-use aspectus_server::config::Config;
-use aspectus_server::db;
 use aspectus_server::middleware::auth::service_token_auth;
 use aspectus_server::AppState;
 
@@ -23,7 +22,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "aspectus_server=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "aspectus_server=info,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -97,13 +96,23 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state)
         .merge(mgmt)
         .layer(CorsLayer::permissive())
+        .layer(DefaultBodyLimit::max(1024 * 16)) // 16KB
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!("Aspectus v{} starting on {}", env!("CARGO_PKG_VERSION"), addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c()
+        .await
+        .expect("failed to listen for ctrl+c");
+    tracing::info!("Shutting down gracefully...");
 }
