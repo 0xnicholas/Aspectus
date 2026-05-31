@@ -31,3 +31,5 @@ hex = "0.4"
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
 tokio.workspace = true
+sha2.workspace = true
+hex = "0.4"
