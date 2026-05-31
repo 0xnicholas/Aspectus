@@ -41,6 +41,26 @@ pub async fn create(
         Err(e) => return ProblemDetails::from(e).into_response(),
     };
 
+    // v0.3.0: Validate scopes exist in the database
+    if !req.scopes.is_empty() {
+        let valid = sqlx::query_scalar::<_, bool>(
+            "SELECT COUNT(*) = $1 FROM scopes WHERE name = ANY($2)",
+        )
+        .bind(req.scopes.len() as i64)
+        .bind(&req.scopes)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(false);
+
+        if !valid {
+            return ProblemDetails::validation_failed(
+                "One or more scopes are not valid for this project",
+                vec![],
+            )
+            .into_response();
+        }
+    }
+
     let sa = match state
         .service_account_store
         .get_by_id(&req.service_account_id)

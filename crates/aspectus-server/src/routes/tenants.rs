@@ -57,6 +57,39 @@ pub async fn get(
     }
 }
 
+pub async fn update_quotas(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(quotas): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    match sqlx::query(
+        "UPDATE tenants SET quotas = $1 WHERE id = $2",
+    )
+    .bind(&quotas)
+    .bind(&id)
+    .execute(&state.pool)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            let _ = state.audit_log_store.append(AuditLog {
+                id: generate_id(),
+                tenant_id: id.clone(),
+                actor_id: "mgmt".into(),
+                actor_type: IdentityType::ServiceAccount,
+                action: "quota.updated".into(),
+                target_type: "tenant".into(),
+                target_id: id,
+                metadata: json!({"quotas": &quotas}),
+                created_at: Utc::now(),
+            }).await;
+
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(_) => ProblemDetails::not_found("Tenant not found").into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+    }
+}
+
 fn generate_id() -> String {
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).expect("RNG failure");

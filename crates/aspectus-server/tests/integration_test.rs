@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
 use hex;
 use sha2::{Digest, Sha256};
 
@@ -153,7 +154,7 @@ async fn audit_log_appended() {
     let (tenant_store, _ss, _as, audit_store, _cr, _sv, _svc) = setup().await;
     let tenant = tenant_store.create("audit-tenant").await.unwrap();
     let entry = AuditLog {
-        id: "audit-01".into(),
+        id: format!("audit-{:06}", (Utc::now().timestamp_millis() % 1_000_000).abs()),
         tenant_id: tenant.id,
         actor_id: "mgmt".into(),
         actor_type: IdentityType::ServiceAccount,

@@ -26,4 +26,5 @@ pub struct AppState {
     pub api_key_creator: Arc<ApiKeyCreator>,
     pub api_key_verifier: Arc<ApiKeyVerifier>,
     pub svc_token_verifier: Arc<ServiceTokenVerifier>,
+    pub pool: sqlx::PgPool,
 }

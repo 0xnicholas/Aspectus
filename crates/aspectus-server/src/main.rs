@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{middleware, Router, routing::{delete, get, post}};
+use axum::{middleware, Router, routing::{delete, get, post, put}};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -50,11 +50,12 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         tenant_store: Arc::new(PgTenantStore::new(pool.clone())),
         service_account_store: Arc::new(PgServiceAccountStore::new(pool.clone())),
-        api_key_store,
+        api_key_store: api_key_store.clone(),
         audit_log_store: Arc::new(PgAuditLogStore::new(pool.clone())),
         api_key_creator,
         api_key_verifier,
         svc_token_verifier: svc_token_verifier.clone(),
+        pool: pool.clone(),
     };
 
     // Auth middleware closure
@@ -71,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
     let mgmt = Router::new()
         .route("/tenants", post(aspectus_server::routes::tenants::create))
         .route("/tenants/{id}", get(aspectus_server::routes::tenants::get))
+        .route("/tenants/{id}/quotas", put(aspectus_server::routes::tenants::update_quotas))
         .route(
             "/service-accounts",
             post(aspectus_server::routes::service_accounts::create)
