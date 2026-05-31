@@ -14,15 +14,27 @@ pub use service_token_store::PgServiceTokenStore;
 pub use tenant_store::PgTenantStore;
 
 /// Initialize a PostgreSQL connection pool and verify connectivity.
-pub async fn init_pool(database_url: &str) -> anyhow::Result<PgPool> {
+///
+/// Pool sizing based on typical Aspectus workload:
+/// - max_connections: 50 (handles ~200 concurrent /introspect requests)
+/// - min_connections: 10 (avoids cold-start latency)
+/// - acquire_timeout: 5s (fast fail vs hanging)
+/// - idle_timeout: 300s (release idle connections)
+pub async fn init_pool(config: &crate::config::Config) -> anyhow::Result<PgPool> {
     let pool = PgPoolOptions::new()
-        .max_connections(20)
-        .min_connections(5)
-        .connect(database_url)
+        .max_connections(config.db_max_connections)
+        .min_connections(config.db_min_connections)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .idle_timeout(std::time::Duration::from_secs(300))
+        .connect(&config.database_url)
         .await?;
 
     sqlx::query("SELECT 1").execute(&pool).await?;
-    tracing::info!("PostgreSQL connection pool established (max=20, min=5)");
+    tracing::info!(
+        max = config.db_max_connections,
+        min = config.db_min_connections,
+        "PostgreSQL connection pool established",
+    );
 
     Ok(pool)
 }

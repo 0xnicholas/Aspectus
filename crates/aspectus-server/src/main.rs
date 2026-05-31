@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let pool = db::init_pool(&config.database_url).await?;
+    let pool = db::init_pool(&config).await?;
 
     // Redis
     let redis_client = redis::Client::open(config.redis_url.as_str())?;

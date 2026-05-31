@@ -5,6 +5,8 @@ pub struct Config {
     pub port: u16,
     pub database_url: String,
     pub redis_url: String,
+    pub db_max_connections: u32,
+    pub db_min_connections: u32,
 }
 
 impl Config {
@@ -17,6 +19,14 @@ impl Config {
             database_url: std::env::var("DATABASE_URL").context("DATABASE_URL must be set")?,
             redis_url: std::env::var("REDIS_URL")
                 .unwrap_or_else(|_| "redis://localhost:6379".into()),
+            db_max_connections: std::env::var("DB_MAX_CONNECTIONS")
+                .unwrap_or_else(|_| "50".into())
+                .parse()
+                .context("DB_MAX_CONNECTIONS must be a u32")?,
+            db_min_connections: std::env::var("DB_MIN_CONNECTIONS")
+                .unwrap_or_else(|_| "10".into())
+                .parse()
+                .context("DB_MIN_CONNECTIONS must be a u32")?,
         })
     }
 }
