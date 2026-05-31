@@ -4,6 +4,8 @@
 //! Service Token verification, and Redis caching.
 
 mod cache;
+pub mod jwt;
+mod token_verifier;
 
 use std::sync::Arc;
 
@@ -20,6 +22,7 @@ use aspectus_core::{
 };
 
 pub use cache::RedisCache;
+pub use token_verifier::TokenVerifier;
 
 // ---- Helpers ----
 
@@ -46,6 +49,7 @@ fn build_response(api_key: &ApiKey) -> IntrospectResponse {
         token_type: Some("Bearer".into()),
         exp: api_key.expires_at.map(|dt| dt.timestamp()),
         quotas: None,
+        token_format: Some("api_key".into()),
     }
 }
 
@@ -62,7 +66,7 @@ fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
 
 
 /// Generate a random 21-char hex ID. Returns empty string on RNG failure.
-fn generate_id() -> String {
+pub(crate) fn generate_id() -> String {
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes)
         .map(|_| hex::encode(&bytes)[..21].to_string())

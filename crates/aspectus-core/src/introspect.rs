@@ -37,6 +37,10 @@ pub struct IntrospectResponse {
     /// Per-project quota limits (v0.3.0+).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quotas: Option<HashMap<String, serde_json::Value>>,
+
+    /// Token format (v0.4.0+): "api_key" | "jwt" | "opaque"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_format: Option<String>,
 }
 
 impl IntrospectResponse {
@@ -52,6 +56,7 @@ impl IntrospectResponse {
             token_type: None,
             exp: None,
             quotas: None,
+            token_format: None,
         }
     }
 }
