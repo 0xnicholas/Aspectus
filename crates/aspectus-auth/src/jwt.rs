@@ -33,7 +33,6 @@ impl JwtSigner {
             .context("JWT_PRIVATE_KEY_PEM required for v0.4 JWT")?;
         Ok(Self { encoding_key: EncodingKey::from_rsa_pem(pem.as_bytes())? })
     }
-
     pub fn sign(
         &self, sub: &str, tenant_id: &str, project: Project,
         scopes: &str, ttl_seconds: u64,
@@ -49,6 +48,15 @@ impl JwtSigner {
         encode(&Header::new(jsonwebtoken::Algorithm::RS256), &claims, &self.encoding_key)
             .map_err(|e| CoreError::Internal(format!("JWT: {e}")))
     }
+    pub fn jwks_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "keys": [{
+                "kty": "RSA",
+                "use": "sig",
+                "alg": "RS256"
+            }]
+        })
+    }
 }
 
 pub struct JwtVerifier {
@@ -62,7 +70,6 @@ impl JwtVerifier {
             .context("JWT_PUBLIC_KEY_PEM required for v0.4 JWT")?;
         Ok(Self { decoding_key: DecodingKey::from_rsa_pem(pem.as_bytes())?, cache })
     }
-
     pub async fn verify(&self, token: &str) -> IntrospectResponse {
         let mut v = Validation::new(jsonwebtoken::Algorithm::RS256);
         v.validate_exp = true;
@@ -79,7 +86,6 @@ impl JwtVerifier {
             exp: Some(claims.exp as i64), quotas: None, token_format: Some("jwt".into()),
         }
     }
-
     pub async fn revoke(&self, token: &str) -> bool {
         let mut v = Validation::new(jsonwebtoken::Algorithm::RS256);
         v.validate_exp = false;

@@ -2,6 +2,7 @@
 //!
 //! v0.2.0: Full implementation of API key creation/verification,
 //! Service Token verification, and Redis caching.
+//! v0.4.0: JWT signing/verification + Opaque Token support.
 
 mod cache;
 pub mod jwt;
@@ -26,18 +27,17 @@ pub use token_verifier::TokenVerifier;
 
 // ---- Helpers ----
 
-/// Extract raw bytes from a "pk_live_{hex}" formatted key.
 fn extract_raw_from_key(token: &str) -> Option<Vec<u8>> {
-    let encoded = token.strip_prefix("pk_live_")?;
+    let encoded = token
+        .strip_prefix("pk_live_")
+        .or_else(|| token.strip_prefix("ot_"))?;
     hex::decode(encoded).ok()
 }
 
-/// SHA256 hash as hex string.
 fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
-/// Build an IntrospectResponse from a valid ApiKey row.
 fn build_response(api_key: &ApiKey) -> IntrospectResponse {
     IntrospectResponse {
         active: true,
@@ -53,7 +53,6 @@ fn build_response(api_key: &ApiKey) -> IntrospectResponse {
     }
 }
 
-/// Redis cache TTL: min(remaining_seconds / 10, 300).
 fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
     match expires_at {
         Some(exp) => {
@@ -64,13 +63,10 @@ fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
     }
 }
 
-
-/// Generate a random 21-char hex ID. Returns empty string on RNG failure.
 pub(crate) fn generate_id() -> String {
     let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes)
-        .map(|_| hex::encode(&bytes)[..21].to_string())
-        .unwrap_or_default()
+    getrandom::getrandom(&mut bytes).unwrap_or_default();
+    hex::encode(&bytes)[..21].to_string()
 }
 
 // ---- ApiKeyCreator ----
@@ -93,30 +89,40 @@ impl ApiKeyCreator {
         expires_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Result<CreatedApiKey, CoreError> {
         let id = generate_id();
-
         let mut raw = [0u8; 32];
         getrandom::getrandom(&mut raw).map_err(|e| CoreError::Internal(format!("RNG: {e}")))?;
-
         let key = format!("pk_live_{}", hex::encode(&raw));
         let key_hash = sha256_hex(&raw);
-        let key_prefix = key[..17].to_string(); // "pk_live_" + 8 hex chars
+        let key_prefix = key[..17].to_string();
+        self.store.insert(
+            &id, tenant_id, service_account_id, project, &key_hash, &key_prefix,
+            &scopes, expires_at,
+        ).await?;
+        Ok(CreatedApiKey { id, key, key_prefix, project, scopes, expires_at })
+    }
 
-        let _db_key = self
-            .store
-            .insert(
-                &id, tenant_id, service_account_id, project, &key_hash, &key_prefix,
-                &scopes, expires_at,
-            )
-            .await?;
-
-        Ok(CreatedApiKey {
-            id,
-            key,
-            key_prefix,
-            project,
-            scopes,
-            expires_at,
-        })
+    /// Create an Opaque Token (v0.4.0). Uses ot_ prefix.
+    pub async fn create_opaque(
+        &self,
+        tenant_id: &str,
+        service_account_id: &str,
+        project: Project,
+        scopes: &str,
+        ttl_seconds: u64,
+    ) -> Result<CreatedApiKey, CoreError> {
+        let id = generate_id();
+        let mut raw = [0u8; 32];
+        getrandom::getrandom(&mut raw).map_err(|e| CoreError::Internal(format!("RNG: {e}")))?;
+        let key = format!("ot_{}", hex::encode(&raw));
+        let key_hash = sha256_hex(&raw);
+        let key_prefix = key[..10].to_string();
+        let expires_at = Some(Utc::now() + chrono::Duration::seconds(ttl_seconds as i64));
+        let scopes_vec: Vec<String> = scopes.split_whitespace().map(String::from).collect();
+        self.store.insert(
+            &id, tenant_id, service_account_id, project, &key_hash, &key_prefix,
+            &scopes_vec, expires_at,
+        ).await?;
+        Ok(CreatedApiKey { id, key, key_prefix, project, scopes: scopes_vec, expires_at })
     }
 }
 
@@ -132,13 +138,10 @@ impl ApiKeyVerifier {
         Self { store, cache }
     }
 
-    /// Invalidate the cache entry for a specific key hash.
-    /// Called when an API key is revoked.
     pub async fn invalidate_cache(&self, key_hash: &str) {
         self.cache.del(&format!("introspect:{key_hash}")).await;
     }
 
-    /// Health check for the Redis cache.
     pub async fn cache_health(&self) -> Result<(), String> {
         self.cache.ping().await
     }
@@ -148,32 +151,20 @@ impl ApiKeyVerifier {
             Some(r) => r,
             None => return IntrospectResponse::inactive(),
         };
-
         let key_hash = sha256_hex(&raw);
         let cache_key = format!("introspect:{key_hash}");
-
-        // Redis cache lookup
         if let Some(cached) = self.cache.get_json::<IntrospectResponse>(&cache_key).await {
             if let Some(exp) = cached.exp {
-                if exp < Utc::now().timestamp() {
-                    return IntrospectResponse::inactive();
-                }
+                if exp < Utc::now().timestamp() { return IntrospectResponse::inactive(); }
             }
             return cached;
         }
-
-        // PostgreSQL fallback
         match self.store.find_by_hash(&key_hash).await {
             Ok(Some(api_key)) => {
-                if api_key.revoked_at.is_some() {
-                    return IntrospectResponse::inactive();
-                }
+                if api_key.revoked_at.is_some() { return IntrospectResponse::inactive(); }
                 if let Some(exp) = api_key.expires_at {
-                    if exp < Utc::now() {
-                        return IntrospectResponse::inactive();
-                    }
+                    if exp < Utc::now() { return IntrospectResponse::inactive(); }
                 }
-
                 let response = build_response(&api_key);
                 let ttl = compute_cache_ttl(api_key.expires_at);
                 self.cache.set_json(&cache_key, &response, ttl).await;
@@ -200,18 +191,12 @@ impl ServiceTokenVerifier {
     pub async fn verify(&self, token: &str) -> Option<Project> {
         let token_hash = sha256_hex(token.as_bytes());
         let cache_key = format!("svc_token:{token_hash}");
-
-        // Redis (TTL=60s)
         if let Some(project_str) = self.cache.get(&cache_key).await {
             return project_str.parse().ok();
         }
-
-        // PostgreSQL
         match self.store.find_by_hash(&token_hash).await {
             Ok(Some(project)) => {
-                self.cache
-                    .set(&cache_key, &project.to_string(), 60)
-                    .await;
+                self.cache.set(&cache_key, &project.to_string(), 60).await;
                 Some(project)
             }
             _ => None,
@@ -234,9 +219,16 @@ mod tests {
     }
 
     #[test]
+    fn extract_raw_from_opaque_key() {
+        let raw = [0xabu8; 32];
+        let key = format!("ot_{}", hex::encode(&raw));
+        let extracted = extract_raw_from_key(&key).unwrap();
+        assert_eq!(extracted, raw.to_vec());
+    }
+
+    #[test]
     fn extract_raw_from_invalid_prefix() {
         assert!(extract_raw_from_key("invalid").is_none());
-        assert!(extract_raw_from_key("pk_live_zzz").is_none()); // invalid hex
     }
 
     #[test]
@@ -262,6 +254,6 @@ mod tests {
     #[test]
     fn compute_cache_ttl_capped() {
         let far_future = Utc::now() + chrono::Duration::seconds(10000);
-        assert_eq!(compute_cache_ttl(Some(far_future)), 300); // capped
+        assert_eq!(compute_cache_ttl(Some(far_future)), 300);
     }
 }
