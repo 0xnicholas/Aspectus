@@ -58,6 +58,14 @@ impl ApiKeyStore for PgApiKeyStore {
             .map_err(|e| CoreError::Internal(e.to_string()))
     }
 
+    async fn find_by_id(&self, id: &str) -> Result<Option<ApiKey>, CoreError> {
+        sqlx::query_as::<_, ApiKey>("SELECT * FROM api_keys WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| CoreError::Internal(e.to_string()))
+    }
+
     async fn list_by_service_account(
         &self,
         service_account_id: &str,

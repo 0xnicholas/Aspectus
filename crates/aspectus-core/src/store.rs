@@ -58,6 +58,12 @@ pub trait ApiKeyStore: Send + Sync {
         key_hash: &str,
     ) -> Result<Option<ApiKey>, crate::error::CoreError>;
 
+    /// Look up by primary key ID.
+    async fn find_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ApiKey>, crate::error::CoreError>;
+
     /// List all keys for a given service account (metadata only, no hash).
     async fn list_by_service_account(
         &self,

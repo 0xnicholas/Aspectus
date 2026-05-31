@@ -125,6 +125,12 @@ impl ApiKeyVerifier {
         Self { store, cache }
     }
 
+    /// Invalidate the cache entry for a specific key hash.
+    /// Called when an API key is revoked.
+    pub async fn invalidate_cache(&self, key_hash: &str) {
+        self.cache.del(&format!("introspect:{key_hash}")).await;
+    }
+
     pub async fn verify(&self, token: &str) -> IntrospectResponse {
         let raw = match extract_raw_from_key(token) {
             Some(r) => r,
