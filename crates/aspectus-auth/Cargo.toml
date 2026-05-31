@@ -1,0 +1,13 @@
+[package]
+name = "aspectus-auth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+aspectus-core = { path = "../aspectus-core" }
+sha2.workspace = true
+argon2.workspace = true
+redis.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
