@@ -22,6 +22,10 @@ chrono.workspace = true
 mime.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
+async-trait = "0.1"
+ksuid.workspace = true
+getrandom = "0.2"
+hex = "0.4"
 
 [dev-dependencies]
 testcontainers.workspace = true

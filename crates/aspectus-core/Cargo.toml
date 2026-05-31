@@ -11,3 +11,4 @@ chrono.workspace = true
 ksuid.workspace = true
 sqlx.workspace = true
 sha2.workspace = true
+async-trait = "0.1"

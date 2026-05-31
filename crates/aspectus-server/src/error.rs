@@ -102,3 +102,17 @@ impl IntoResponse for ProblemDetails {
         response
     }
 }
+
+impl From<aspectus_core::error::CoreError> for ProblemDetails {
+    fn from(err: aspectus_core::error::CoreError) -> Self {
+        match &err {
+            aspectus_core::error::CoreError::NotFound { entity, id } => {
+                Self::not_found(format!("{entity} not found: {id}"))
+            }
+            aspectus_core::error::CoreError::Validation(msg) => {
+                Self::validation_failed(msg.clone(), vec![])
+            }
+            _ => Self::internal_error(err.to_string()),
+        }
+    }
+}

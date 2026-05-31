@@ -59,7 +59,13 @@ version = "0.1.0"
 dependencies = [
  "argon2",
  "aspectus-core",
+ "async-trait",
+ "chrono",
+ "getrandom 0.2.17",
+ "hex",
  "redis",
+ "serde",
+ "serde_json",
  "sha2",
  "sqlx",
  "thiserror",
@@ -81,6 +87,7 @@ dependencies = [
 name = "aspectus-core"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "ksuid",
  "serde",
@@ -97,10 +104,14 @@ dependencies = [
  "anyhow",
  "aspectus-auth",
  "aspectus-core",
+ "async-trait",
  "axum",
  "chrono",
  "dotenvy",
+ "getrandom 0.2.17",
+ "hex",
  "hyper",
+ "ksuid",
  "mime",
  "redis",
  "serde",
