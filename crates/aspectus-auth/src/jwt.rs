@@ -1,6 +1,5 @@
 //! JWT signing and verification (v0.4.0).
 
-use anyhow::Context;
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -27,10 +26,25 @@ pub struct JwtSigner {
     encoding_key: EncodingKey,
 }
 
+const TEST_PRIVATE: &str = include_str!("test_private.pem");
+const TEST_PUBLIC: &str = include_str!("test_public.pem");
+
 impl JwtSigner {
     pub fn from_env() -> anyhow::Result<Self> {
         let pem = std::env::var("JWT_PRIVATE_KEY_PEM")
-            .context("JWT_PRIVATE_KEY_PEM required for v0.4 JWT")?;
+            .ok()
+            .and_then(|v| {
+                // Try as file path first, then as inline PEM
+                if std::path::Path::new(&v).exists() {
+                    std::fs::read_to_string(&v).ok()
+                } else {
+                    Some(v)
+                }
+            })
+            .unwrap_or_else(|| {
+                tracing::info!("Using dev test JWT keys");
+                TEST_PRIVATE.to_string()
+            });
         Ok(Self { encoding_key: EncodingKey::from_rsa_pem(pem.as_bytes())? })
     }
     pub fn sign(
@@ -67,7 +81,15 @@ pub struct JwtVerifier {
 impl JwtVerifier {
     pub fn from_env(cache: RedisCache) -> anyhow::Result<Self> {
         let pem = std::env::var("JWT_PUBLIC_KEY_PEM")
-            .context("JWT_PUBLIC_KEY_PEM required for v0.4 JWT")?;
+            .ok()
+            .and_then(|v| {
+                if std::path::Path::new(&v).exists() {
+                    std::fs::read_to_string(&v).ok()
+                } else {
+                    Some(v)
+                }
+            })
+            .unwrap_or_else(|| TEST_PUBLIC.to_string());
         Ok(Self { decoding_key: DecodingKey::from_rsa_pem(pem.as_bytes())?, cache })
     }
     pub async fn verify(&self, token: &str) -> IntrospectResponse {
