@@ -1,5 +1,5 @@
-const BASE = "http://localhost:3100";
-const TOKEN = "aspectus-dev-pandaria-service-token";
+const BASE = import.meta.env.VITE_API_BASE || "http://localhost:3100";
+const TOKEN = import.meta.env.VITE_SERVICE_TOKEN || "";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -35,6 +35,17 @@ export const api = {
     request<any>("/api-keys", { method: "POST", body: JSON.stringify(data) }),
   revokeApiKey: (id: string) =>
     request<void>(`/api-keys/${id}`, { method: "DELETE" }),
+
+  // Clients
+  listClients: () => request<any[]>("/clients"),
+  createClient: (data: any) =>
+    request<any>("/clients", { method: "POST", body: JSON.stringify(data) }),
+
+  // Service Accounts
+  listServiceAccounts: (tenant_id: string) =>
+    request<any[]>(`/service-accounts?tenant_id=${tenant_id}`),
+  createServiceAccount: (data: any) =>
+    request<any>("/service-accounts", { method: "POST", body: JSON.stringify(data) }),
 
   // Roles
   listRoles: () => request<any[]>("/roles"),

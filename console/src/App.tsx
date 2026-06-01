@@ -2,16 +2,20 @@ import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-do
 import { Dashboard } from "./pages/Dashboard";
 import { Tenants } from "./pages/Tenants";
 import { Users } from "./pages/Users";
+import { ServiceAccounts } from "./pages/ServiceAccounts";
 import { ApiKeys } from "./pages/ApiKeys";
 import { Roles } from "./pages/Roles";
+import { Clients } from "./pages/Clients";
 import { AuditLogs } from "./pages/AuditLogs";
 
 const NAV = [
   { path: "/", label: "Dashboard" },
   { path: "/tenants", label: "Tenants" },
+  { path: "/service-accounts", label: "Svc Accounts" },
   { path: "/users", label: "Users" },
   { path: "/api-keys", label: "API Keys" },
   { path: "/roles", label: "Roles" },
+  { path: "/clients", label: "OAuth2 Clients" },
   { path: "/audit-logs", label: "Audit Logs" },
 ];
 
@@ -25,11 +29,8 @@ function Sidebar() {
           key={item.path}
           to={item.path}
           style={{
-            display: "block",
-            padding: "8px 12px",
-            margin: "4px 0",
-            borderRadius: 6,
-            textDecoration: "none",
+            display: "block", padding: "8px 12px", margin: "4px 0", borderRadius: 6,
+            textDecoration: "none", fontSize: 14,
             color: location.pathname === item.path ? "#fff" : "#aaa",
             background: location.pathname === item.path ? "#16213e" : "transparent",
           }}
@@ -50,9 +51,11 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/tenants" element={<Tenants />} />
+            <Route path="/service-accounts" element={<ServiceAccounts />} />
             <Route path="/users" element={<Users />} />
             <Route path="/api-keys" element={<ApiKeys />} />
             <Route path="/roles" element={<Roles />} />
+            <Route path="/clients" element={<Clients />} />
             <Route path="/audit-logs" element={<AuditLogs />} />
           </Routes>
         </main>
