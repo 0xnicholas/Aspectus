@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod db;
+pub mod scope_expander;
 pub mod error;
 pub mod middleware;
 pub mod routes;

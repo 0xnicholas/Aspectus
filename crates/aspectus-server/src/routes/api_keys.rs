@@ -12,7 +12,7 @@ use aspectus_core::{
     audit_log::AuditLog,
     identity::IdentityType,
     project::Project,
-    store::{ApiKeyStore, AuditLogStore, ServiceAccountStore},
+    store::{ApiKeyStore, AuditLogStore, ServiceAccountStore, UserStore},
 };
 
 use crate::error::ProblemDetails;
@@ -21,7 +21,12 @@ use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct CreateApiKeyRequest {
-    service_account_id: String,
+    #[serde(default)]
+    owner_type: Option<String>,
+    #[serde(default)]
+    owner_id: Option<String>,
+    #[serde(default)]
+    service_account_id: Option<String>,
     project: String,
     scopes: Vec<String>,
     #[serde(default)]
@@ -41,6 +46,24 @@ pub async fn create(
         Ok(p) => p,
         Err(e) => return ProblemDetails::from(e).into_response(),
     };
+
+    // Resolve owner: new format takes priority, fallback to service_account_id
+    let owner_type = req.owner_type.as_deref().unwrap_or("service_account");
+    let owner_id = if let Some(id) = &req.owner_id {
+        id.clone()
+    } else if let Some(sa_id) = &req.service_account_id {
+        sa_id.clone()
+    } else {
+        return ProblemDetails::validation_failed(
+            "Either owner_type+owner_id or service_account_id is required", vec![],
+        ).into_response();
+    };
+
+    if !["user", "service_account"].contains(&owner_type) {
+        return ProblemDetails::validation_failed(
+            format!("Invalid owner_type: {owner_type}"), vec![],
+        ).into_response();
+    }
 
     // v0.3.0: Validate scopes exist in the database
     if !req.scopes.is_empty() {
@@ -62,20 +85,22 @@ pub async fn create(
         }
     }
 
-    let sa = match state
-        .service_account_store
-        .get_by_id(&req.service_account_id)
-        .await
-    {
-        Ok(Some(sa)) => sa,
-        Ok(None) => {
-            return ProblemDetails::not_found(format!(
-                "ServiceAccount {} not found",
-                req.service_account_id
-            ))
-            .into_response()
+    // Resolve tenant_id from owner
+    let tenant_id = match owner_type {
+        "user" => {
+            match state.user_store.get_by_id(&owner_id).await {
+                Ok(Some(user)) => user.tenant_id,
+                Ok(None) => return ProblemDetails::not_found(format!("User {owner_id} not found")).into_response(),
+                Err(e) => return ProblemDetails::from(e).into_response(),
+            }
         }
-        Err(e) => return ProblemDetails::from(e).into_response(),
+        _ => {
+            match state.service_account_store.get_by_id(&owner_id).await {
+                Ok(Some(sa)) => sa.tenant_id,
+                Ok(None) => return ProblemDetails::not_found(format!("ServiceAccount {owner_id} not found")).into_response(),
+                Err(e) => return ProblemDetails::from(e).into_response(),
+            }
+        }
     };
 
     let expires_at = req
@@ -83,11 +108,12 @@ pub async fn create(
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc));
 
+    // For v0.5, pass owner_id as service_account_id (creator handles both)
     match state
         .api_key_creator
         .create(
-            &sa.tenant_id,
-            &req.service_account_id,
+            &tenant_id,
+            &owner_id,
             project,
             req.scopes.clone(),
             expires_at,
@@ -97,14 +123,14 @@ pub async fn create(
         Ok(key) => {
             let _ = state.audit_log_store.append(AuditLog {
                 id: generate_id(),
-                tenant_id: sa.tenant_id,
+                tenant_id: tenant_id.clone(),
                 actor_id: "mgmt".into(),
                 actor_type: IdentityType::ServiceAccount,
                 action: "api_key.created".into(),
                 target_type: "api_key".into(),
                 target_id: key.id.clone(),
                 metadata: json!({
-                    "service_account_id": &req.service_account_id,
+                    "owner_type": owner_type, "owner_id": &owner_id,
                     "project": req.project,
                     "scopes": &req.scopes,
                 }),

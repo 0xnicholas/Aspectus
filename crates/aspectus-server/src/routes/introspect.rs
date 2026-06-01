@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Form, Json};
 use serde::Deserialize;
 
+use crate::scope_expander::ScopeExpander;
+use aspectus_core::identity::IdentityType;
 use crate::AppState;
 use aspectus_core::store::TenantStore;
 
@@ -22,6 +24,13 @@ pub async fn handle(
 
     // v0.3.0: Inject tenant quotas into the response
     if response.active {
+        // v0.5.0: For User tokens, expand scope from Roles
+        if response.identity_type == Some(aspectus_core::identity::IdentityType::User) {
+            if let Some(ref user_id) = response.user_id {
+                response.scope = Some(ScopeExpander::expand(&state.pool, user_id).await);
+            }
+        }
+
         if let Some(ref tenant_id) = response.tenant_id {
             if let Ok(Some(tenant)) = state.tenant_store.get_by_id(tenant_id).await {
                 if tenant.quotas != serde_json::Value::Null
