@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
         .route("/authorize", post(aspectus_server::routes::oauth::authorize))
         .route("/token", post(aspectus_server::routes::oauth::token))        .route_layer(auth_layer)
-        .with_state(state)
+        .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))        .with_state(state)
         .merge(mgmt)
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(1024 * 16))
