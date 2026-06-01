@@ -5,7 +5,7 @@
 //!
 //! ## Usage
 //!
-//! ```no_run
+//! ```ignore
 //! use aspectus_client::AspectusClient;
 //!
 //! let client = AspectusClient::new("http://localhost:3100", "my-service-token");
