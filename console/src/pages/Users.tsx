@@ -43,8 +43,8 @@ export function Users() {
   const columns = [
     { key: "id", header: "ID", width: 180, render: (u: any) => <code style={{ fontSize: 11 }}>{u.id}</code> },
     { key: "email", header: "Email" },
-    { key: "is_suspended", header: "Status", width: 100, render: (u: any) => u.is_suspended ? <Badge variant="danger">Suspended</Badge> : <Badge variant="success">Active</Badge> },
-    { key: "actions", header: "", width: 100, render: (u: any) => <Button size="sm" variant={u.is_suspended ? "primary" : "danger"} onClick={() => setSuspendTarget(u)}>{u.is_suspended ? "Unsuspend" : "Suspend"}</Button> },
+    { key: "is_suspended", header: "Status", width: 100, render: (u: any) => u.is_suspended ? <Badge variant="destructive">Suspended</Badge> : <Badge variant="success">Active</Badge> },
+    { key: "actions", header: "", width: 100, render: (u: any) => <Button size="sm" variant={u.is_suspended ? "primary" : "destructive"} onClick={() => setSuspendTarget(u)}>{u.is_suspended ? "Unsuspend" : "Suspend"}</Button> },
   ];
 
   return (
@@ -63,7 +63,7 @@ export function Users() {
       <Modal open={!!suspendTarget} title={suspendTarget?.is_suspended ? "Unsuspend User" : "Suspend User"}
         message={`${suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"} ${suspendTarget?.email}?`}
         confirmLabel={suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"}
-        variant={suspendTarget?.is_suspended ? "primary" : "danger"}
+        variant={suspendTarget?.is_suspended ? "primary" : "destructive"}
         onConfirm={toggleSuspend} onCancel={() => setSuspendTarget(null)} />
     </div>
   );

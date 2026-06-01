@@ -1,38 +1,42 @@
-import React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "../lib/utils";
 
-// ── Button ──
+// ── Button (Metronic-style variants) ──
 
-type ButtonVariant = "primary" | "danger" | "ghost";
+const buttonVariants = cva(
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+  {
+    variants: {
+      variant: {
+        primary: "bg-primary text-primary-foreground hover:bg-primary/90",
+        destructive: "bg-red-600 text-white hover:bg-red-700",
+        outline: "border border-border bg-white hover:bg-accent",
+        ghost: "text-gray-600 hover:bg-accent hover:text-gray-900",
+      },
+      size: {
+        sm: "h-8 px-3 text-xs",
+        md: "h-10 px-4",
+        lg: "h-12 px-6",
+      },
+    },
+    defaultVariants: {
+      variant: "primary",
+      size: "md",
+    },
+  }
+);
 
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: ButtonVariant;
+interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
   loading?: boolean;
-  size?: "sm" | "md";
 }
 
-const variants: Record<ButtonVariant, React.CSSProperties> = {
-  primary: { background: "#1a1a2e", color: "#fff" },
-  danger: { background: "#dc3545", color: "#fff" },
-  ghost: { background: "transparent", color: "#1a1a2e", border: "1px solid #ddd" },
-};
-
-export function Button({ variant = "primary", loading, size = "md", style, children, ...props }: ButtonProps) {
+export function Button({ className, variant, size, loading, children, ...props }: ButtonProps) {
   return (
-    <button
-      style={{
-        padding: size === "sm" ? "4px 10px" : "8px 16px",
-        borderRadius: 6,
-        border: "none",
-        cursor: "pointer",
-        fontWeight: 500,
-        fontSize: size === "sm" ? 12 : 14,
-        opacity: props.disabled || loading ? 0.6 : 1,
-        ...variants[variant],
-        ...style,
-      }}
-      {...props}
-    >
-      {loading ? "⏳" : children}
+    <button className={cn(buttonVariants({ variant, size }), className)} {...props}>
+      {loading && <span className="mr-2 animate-spin">⏳</span>}
+      {children}
     </button>
   );
 }
@@ -44,104 +48,46 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string;
 }
 
-export function Input({ label, error, style, ...props }: InputProps) {
+export function Input({ label, error, className, ...props }: InputProps) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {label && <label style={{ fontSize: 13, fontWeight: 500, color: "#555" }}>{label}</label>}
+    <div className="flex flex-col gap-1">
+      {label && <label className="text-sm font-medium text-gray-600">{label}</label>}
       <input
-        style={{
-          padding: "8px 12px",
-          borderRadius: 6,
-          border: `1px solid ${error ? "#dc3545" : "#ccc"}`,
-          fontSize: 14,
-          outline: "none",
-          ...style,
-        }}
+        className={cn(
+          "h-10 rounded-md border border-border px-3 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary",
+          error && "border-red-500",
+          className
+        )}
         {...props}
       />
-      {error && <span style={{ fontSize: 12, color: "#dc3545" }}>{error}</span>}
+      {error && <span className="text-xs text-red-500">{error}</span>}
     </div>
   );
 }
 
-// ── Badge ──
+// ── Badge (Metronic-style) ──
 
-interface BadgeProps {
-  variant?: "success" | "danger" | "info" | "warning";
+const badgeVariants = cva("inline-flex items-center rounded px-2 py-0.5 text-xs font-medium", {
+  variants: {
+    variant: {
+      success: "bg-green-100 text-green-800",
+      destructive: "bg-red-100 text-red-800",
+      warning: "bg-yellow-100 text-yellow-800",
+      info: "bg-blue-100 text-blue-800",
+    },
+  },
+  defaultVariants: { variant: "info" },
+});
+
+interface BadgeProps extends VariantProps<typeof badgeVariants> {
   children: React.ReactNode;
 }
 
-const badgeColors: Record<string, React.CSSProperties> = {
-  success: { background: "#e8f5e9", color: "#2e7d32" },
-  danger: { background: "#fce4ec", color: "#c62828" },
-  info: { background: "#e3f2fd", color: "#1565c0" },
-  warning: { background: "#fff3cd", color: "#856404" },
-};
-
-export function Badge({ variant = "info", children }: BadgeProps) {
-  return (
-    <span
-      style={{
-        padding: "2px 8px",
-        borderRadius: 4,
-        fontSize: 12,
-        fontWeight: 500,
-        ...badgeColors[variant],
-      }}
-    >
-      {children}
-    </span>
-  );
+export function Badge({ variant, children }: BadgeProps) {
+  return <span className={badgeVariants({ variant })}>{children}</span>;
 }
 
-// ── Modal ──
-
-interface ModalProps {
-  open: boolean;
-  title: string;
-  message: string;
-  confirmLabel?: string;
-  variant?: ButtonVariant;
-  onConfirm: () => void;
-  onCancel: () => void;
-  loading?: boolean;
-}
-
-export function Modal({ open, title, message, confirmLabel = "Confirm", variant = "danger", onConfirm, onCancel, loading }: ModalProps) {
-  if (!open) return null;
-  return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-      <div style={{ background: "#fff", borderRadius: 12, padding: 24, minWidth: 360, boxShadow: "0 4px 24px rgba(0,0,0,0.15)" }}>
-        <h3 style={{ marginTop: 0 }}>{title}</h3>
-        <p style={{ color: "#666", fontSize: 14 }}>{message}</p>
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 20 }}>
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-          <Button variant={variant} onClick={onConfirm} loading={loading}>{confirmLabel}</Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Toast ──
-
-let toastId = 0;
-
-export function toast(message: string, type: "success" | "error" = "success") {
-  ++toastId;
-  const el = document.createElement("div");
-  el.style.cssText = `
-    position: fixed; top: 16px; right: 16px; z-index: 2000;
-    padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 14px;
-    animation: slideIn 0.3s ease;
-    background: ${type === "error" ? "#dc3545" : "#2e7d32"};
-  `;
-  el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => { el.remove(); }, 3000);
-}
-
-// ── Table ──
+// ── Table (Tailwind styled) ──
 
 interface Column<T> {
   key: string;
@@ -159,30 +105,76 @@ interface TableProps<T> {
 
 export function Table<T>({ columns, data, rowKey, emptyText = "No data" }: TableProps<T>) {
   if (data.length === 0) {
-    return <p style={{ color: "#888", marginTop: 24 }}>{emptyText}</p>;
+    return <p className="mt-6 text-gray-400">{emptyText}</p>;
   }
   return (
-    <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 16 }}>
-      <thead>
-        <tr style={{ borderBottom: "2px solid #e0e0e0" }}>
-          {columns.map((col) => (
-            <th key={col.key} style={{ textAlign: "left", padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#555", width: col.width }}>
-              {col.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {data.map((row) => (
-          <tr key={rowKey(row)} style={{ borderBottom: "1px solid #f0f0f0" }}>
+    <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-white">
+      <table className="w-full text-sm">
+        <thead className="border-b border-border bg-gray-50">
+          <tr>
             {columns.map((col) => (
-              <td key={col.key} style={{ padding: "10px 12px", fontSize: 14 }}>
-                {col.render ? col.render(row) : String((row as any)[col.key] ?? "")}
-              </td>
+              <th key={col.key} className="px-4 py-3 text-left font-medium text-gray-500" style={{ width: col.width }}>
+                {col.header}
+              </th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {data.map((row) => (
+            <tr key={rowKey(row)} className="border-b border-border last:border-0 hover:bg-gray-50">
+              {columns.map((col) => (
+                <td key={col.key} className="px-4 py-3">
+                  {col.render ? col.render(row) : String((row as any)[col.key] ?? "")}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
+}
+
+// ── Modal (Metronic-style dialog) ──
+
+interface ModalProps {
+  open: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  variant?: "primary" | "destructive";
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading?: boolean;
+}
+
+export function Modal({ open, title, message, confirmLabel = "Confirm", variant = "destructive", onConfirm, onCancel, loading }: ModalProps) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <p className="mt-2 text-sm text-gray-500">{message}</p>
+        <div className="mt-6 flex justify-end gap-3">
+          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant={variant} onClick={onConfirm} loading={loading}>{confirmLabel}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Toast ──
+
+let toastId = 0;
+
+export function toast(message: string, type: "success" | "error" = "success") {
+  ++toastId;
+  const el = document.createElement("div");
+  el.className = `fixed top-4 right-4 z-50 px-4 py-3 rounded-lg text-white text-sm shadow-lg animate-[slideIn_0.3s_ease] ${
+    type === "error" ? "bg-red-600" : "bg-green-600"
+  }`;
+  el.textContent = message;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3000);
 }

@@ -34,8 +34,8 @@ export function ApiKeys() {
     { key: "key_prefix", header: "Prefix", width: 160, render: (k: any) => <code style={{ fontSize: 12 }}>{k.key_prefix}</code> },
     { key: "project", header: "Project", width: 100 },
     { key: "scopes", header: "Scopes", render: (k: any) => <span style={{ fontSize: 12 }}>{(k.scopes || []).join(", ") || "—"}</span> },
-    { key: "status", header: "Status", width: 100, render: (k: any) => k.revoked_at ? <Badge variant="danger">Revoked</Badge> : <Badge variant="success">Active</Badge> },
-    { key: "actions", header: "", width: 80, render: (k: any) => !k.revoked_at && <Button size="sm" variant="danger" onClick={() => setRevokeTarget(k.id)}>Revoke</Button> },
+    { key: "status", header: "Status", width: 100, render: (k: any) => k.revoked_at ? <Badge variant="destructive">Revoked</Badge> : <Badge variant="success">Active</Badge> },
+    { key: "actions", header: "", width: 80, render: (k: any) => !k.revoked_at && <Button size="sm" variant="destructive" onClick={() => setRevokeTarget(k.id)}>Revoke</Button> },
   ];
 
   return (
@@ -62,7 +62,7 @@ export function ApiKeys() {
       </div>
       <Table columns={columns} data={keys} rowKey={k => k.id} />
       <Modal open={!!revokeTarget} title="Revoke API Key" message="This action cannot be undone. The key will stop working immediately."
-        confirmLabel="Revoke" variant="danger" onConfirm={revoke} onCancel={() => setRevokeTarget(null)} />
+        confirmLabel="Revoke" variant="destructive" onConfirm={revoke} onCancel={() => setRevokeTarget(null)} />
     </div>
   );
 }
