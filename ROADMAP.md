@@ -1,7 +1,14 @@
 # Aspectus Roadmap
 
 > 最后更新：2026-06-01
-> 当前：**v0.8.0 完成 — 22/22 测试通过，10 migration，OpenAPI 文档就绪**
+> 当前：**v0.8.0 完成 — 全栈就绪**
+
+```
+✅ 后端：Rust/axum | 18 API | 23 tests | 10 migrations | 13 tables
+✅ 前端：React/TypeScript | 8 pages | 6 components | Vite
+✅ 文档：OpenAPI 3.0 | ADR×15 | Spec×7 | 对比×2
+✅ 部署：Dockerfile | docker-compose | env config
+```
 
 ---
 
