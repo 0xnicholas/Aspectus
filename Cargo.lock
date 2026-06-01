@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "aspectus-auth"
-version = "0.1.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -76,7 +76,7 @@ dependencies = [
 
 [[package]]
 name = "aspectus-client"
-version = "0.1.0"
+version = "0.8.0"
 dependencies = [
  "aspectus-core",
  "reqwest",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "aspectus-core"
-version = "0.1.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "aspectus-server"
-version = "0.1.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "aspectus-auth",
