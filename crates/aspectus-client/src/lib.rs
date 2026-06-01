@@ -14,7 +14,7 @@
 //! ```
 
 use aspectus_core::introspect::IntrospectResponse;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Request body for `POST /introspect`.
 #[derive(Debug, Clone, Serialize)]
