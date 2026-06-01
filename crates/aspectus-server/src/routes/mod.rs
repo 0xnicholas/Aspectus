@@ -5,5 +5,6 @@ pub mod service_accounts;
 pub mod tenants;
 pub mod token;
 pub mod users;
+pub mod metrics;
 pub mod oauth;
 pub mod roles;

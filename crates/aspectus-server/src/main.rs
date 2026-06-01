@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/introspect", post(aspectus_server::routes::introspect::handle))
         .route_layer(auth_layer)
         .route("/health", get(aspectus_server::routes::health::handle))
-        .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
+        .route("/metrics", get(aspectus_server::routes::metrics::handle))        .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
         .route("/authorize", post(aspectus_server::routes::oauth::authorize))
         .route("/oauth/token", post(aspectus_server::routes::oauth::token))
         .with_state(state)
