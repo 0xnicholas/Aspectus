@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Button, Input, Table, Badge, toast } from "../components/ui";
+import { Button, Input, Table, toast } from "../components/ui";
 import { api } from "../api/client";
 
 export function Roles() {
@@ -7,7 +7,7 @@ export function Roles() {
   const [userId, setUserId] = useState("");
   const [selectedRole, setSelectedRole] = useState("");
 
-  useEffect(() => { api.listRoles().then(setRoles).catch(() => toast("Failed to load roles", "error")); }, []);
+  useEffect(() => { api.listRoles().then(setRoles).catch(() => toast("Failed", "error")); }, []);
 
   const assign = async () => {
     if (!userId || !selectedRole) return toast("Select user and role", "error");
@@ -15,23 +15,29 @@ export function Roles() {
     catch (e: any) { toast(e.message, "error"); }
   };
 
-  const typeVariant = (t: string) => t === "user" ? "info" : t === "service_account" ? "warning" : "success";
+  const typeBadge = (t: string) => {
+    const colors: Record<string, string> = {
+      user: "bg-blue-100 text-blue-800", service_account: "bg-yellow-100 text-yellow-800", both: "bg-green-100 text-green-800",
+    };
+    return `inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${colors[t] || ""}`;
+  };
 
   const columns = [
-    { key: "name", header: "Name", render: (r: any) => <strong>{r.name}</strong> },
-    { key: "type", header: "Type", width: 140, render: (r: any) => <Badge variant={typeVariant(r.type) as any}>{r.type}</Badge> },
-    { key: "is_default", header: "Default", width: 80, render: (r: any) => r.is_default ? "✅" : "" },
-    { key: "description", header: "Description", render: (r: any) => <span style={{ color: "#666", fontSize: 13 }}>{r.description}</span> },
+    { key: "name", header: "Name", render: (r: any) => <span className="font-medium">{r.name}</span> },
+    { key: "type", header: "Type", render: (r: any) => <span className={typeBadge(r.type)}>{r.type}</span> },
+    { key: "default", header: "Default", render: (r: any) => r.is_default ? "✅" : "" },
+    { key: "desc", header: "Description", render: (r: any) => <span className="text-sm text-gray-500">{r.description}</span> },
   ];
 
   return (
     <div>
-      <h1>Roles</h1>
-      <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "flex-end" }}>
+      <h1 className="text-2xl font-bold text-gray-900">Roles</h1>
+      <div className="mt-4 flex flex-wrap items-end gap-3">
         <Input label="User ID" value={userId} onChange={e => setUserId(e.target.value)} />
-        <div>
-          <label style={{ fontSize: 13, fontWeight: 500, color: "#555", display: "block", marginBottom: 4 }}>Role</label>
-          <select value={selectedRole} onChange={e => setSelectedRole(e.target.value)} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #ccc", fontSize: 14 }}>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm font-medium text-gray-600">Role</label>
+          <select value={selectedRole} onChange={e => setSelectedRole(e.target.value)}
+            className="h-10 rounded-md border border-border bg-white px-3 text-sm">
             <option value="">Select role...</option>
             {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>

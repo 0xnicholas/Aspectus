@@ -13,66 +13,56 @@ export function Users() {
   const listUsers = async () => {
     if (!tenantId) return toast("Enter a tenant ID", "error");
     setLoading(true);
-    try {
-      setUsers(await api.listUsers(tenantId));
-    } catch { toast("Failed to load users", "error"); }
+    try { setUsers(await api.listUsers(tenantId)); } catch { toast("Failed", "error"); }
     setLoading(false);
   };
 
   const createUser = async () => {
     if (!tenantId || !email || !password) return toast("All fields required", "error");
-    if (password.length < 8) return toast("Password must be ≥8 chars", "error");
+    if (password.length < 8) return toast("Password ≥8 chars", "error");
     try {
       await api.createUser({ tenant_id: tenantId, email, password, display_name: email.split("@")[0] });
-      toast("User created!");
-      setEmail(""); setPassword("");
-      listUsers();
+      toast("User created!"); setEmail(""); setPassword(""); listUsers();
     } catch (e: any) { toast(e.message, "error"); }
   };
 
   const toggleSuspend = async () => {
     if (!suspendTarget) return;
-    try {
-      await api.suspendUser(suspendTarget.id, !suspendTarget.is_suspended);
-      toast(suspendTarget.is_suspended ? "User unsuspended" : "User suspended");
-      setSuspendTarget(null);
-      listUsers();
-    } catch (e: any) { toast(e.message, "error"); }
+    await api.suspendUser(suspendTarget.id, !suspendTarget.is_suspended);
+    toast(suspendTarget.is_suspended ? "Unsuspended" : "Suspended");
+    setSuspendTarget(null); listUsers();
   };
 
   const columns = [
-    { key: "id", header: "ID", width: 180, render: (u: any) => <code style={{ fontSize: 11 }}>{u.id}</code> },
+    { key: "id", header: "ID", render: (u: any) => <code className="text-xs text-gray-500">{u.id}</code> },
     { key: "email", header: "Email" },
-    { key: "is_suspended", header: "Status", width: 100, render: (u: any) => u.is_suspended ? <Badge variant="destructive">Suspended</Badge> : <Badge variant="success">Active</Badge> },
-    { key: "actions", header: "", width: 100, render: (u: any) => <Button size="sm" variant={u.is_suspended ? "primary" : "destructive"} onClick={() => setSuspendTarget(u)}>{u.is_suspended ? "Unsuspend" : "Suspend"}</Button> },
+    { key: "status", header: "Status", render: (u: any) => u.is_suspended
+      ? <span className="inline-flex items-center rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">Suspended</span>
+      : <span className="inline-flex items-center rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Active</span> },
+    { key: "actions", header: "", render: (u: any) =>
+      <Button size="sm" variant={u.is_suspended ? "primary" : "destructive"} onClick={() => setSuspendTarget(u)}>
+        {u.is_suspended ? "Unsuspend" : "Suspend"}
+      </Button> },
   ];
 
   return (
     <div>
-      <h1>Users</h1>
-      <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <h1 className="text-2xl font-bold text-gray-900">Users</h1>
+      <div className="mt-4 flex flex-wrap items-end gap-3">
         <Input label="Tenant ID" value={tenantId} onChange={e => setTenantId(e.target.value)} />
         <Button onClick={listUsers} loading={loading}>List</Button>
       </div>
-      <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+      <div className="mt-3 flex flex-wrap items-end gap-3">
         <Input label="Email" value={email} onChange={e => setEmail(e.target.value)} />
         <Input label="Password (≥8)" type="password" value={password} onChange={e => setPassword(e.target.value)} />
-        <Button onClick={createUser}>Create User</Button>
+        <Button onClick={createUser}>Create</Button>
       </div>
-      <Table columns={columns} data={users} rowKey={u => u.id} emptyText={loading ? "Loading..." : "No users yet"} />
-      <Modal open={!!suspendTarget} title={suspendTarget?.is_suspended ? "Unsuspend User" : "Suspend User"}
-        message={`${suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"} ${suspendTarget?.email}?`}
+      <Table columns={columns} data={users} rowKey={u => u.id} />
+      <Modal open={!!suspendTarget} title={suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"}
+        message={`${suspendTarget?.email} will be ${suspendTarget?.is_suspended ? "unsuspended" : "suspended"}.`}
         confirmLabel={suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"}
         variant={suspendTarget?.is_suspended ? "primary" : "destructive"}
         onConfirm={toggleSuspend} onCancel={() => setSuspendTarget(null)} />
     </div>
   );
-}
-
-function Badge({ variant, children }: { variant: string; children: React.ReactNode }) {
-  const colors: Record<string, React.CSSProperties> = {
-    success: { background: "#e8f5e9", color: "#2e7d32" },
-    danger: { background: "#fce4ec", color: "#c62828" },
-  };
-  return <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 500, ...colors[variant] }}>{children}</span>;
 }
