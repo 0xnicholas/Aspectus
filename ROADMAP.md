@@ -1,28 +1,29 @@
 # Aspectus Roadmap
 
-> 最后更新：2026-05-31
-> 当前：**设计完成，即将进入 v0.1.0 项目搭建**
+> 最后更新：2026-06-01
+> 当前：**v0.8.0 完成 — 22/22 测试通过，10 migration，OpenAPI 文档就绪**
 
 ---
 
 ## 版本全景
 
 ```
- v0.1.0           v0.2.0             v0.3.0              v1.0.0
- 项目骨架          MVP                多项目+配额          用户+OAuth2
-  ──────→         ──────→           ──────→            ──────→
- 2-3 天           3-4 周             2-3 周              3-4 周
-
- 无消费者          Pandaria 接入       Tavern/Constell/    所有项目完整接入
-                                     Tokencamp 接入
+v0.1 ──→ v0.2 ──→ v0.3 ──→ v0.4 ──→ v0.5 ──→ v0.6 ──→ v0.7 ──→ v0.8
+骨架    MVP    多项目   JWT     User    OAuth2  Refresh  Metrics
+                +配额   Opaque   Role    Code    Token   +Docs
 ```
 
-| 版本 | 语义 | API 稳定性 | 消费者 | 状态 |
-|------|------|:--:|------|:--:|
-| [v0.1.0](#v010--项目骨架) | 项目搭建，无业务 API | — | 无 | ⬜ |
-| [v0.2.0](#v020--mvp服务账号--api-key--introspect) | MVP：Service Account + API Key + `/introspect` | ⚠️ 不稳定 | Pandaria | ⬜ |
-| [v0.3.0](#v030--多项目接入--配额) | 多 Project + 配额管理 | ⚠️ 不稳定（v0.2.x 兼容） | Pandaria, Tavern, Constell, Tokencamp | ⬜ |
-| [v1.0.0](#v100--用户--oauth2--role) | 完整身份平台：User + OAuth2 + Role | ✅ 长期稳定 | 全部生态项目 | ⬜ |
+| 版本 | 状态 | 内容 |
+|------|:--:|------|
+| [v0.1.0](#v010--项目骨架) | ✅ | 项目骨架 + DB schema |
+| [v0.2.0](#v020--mvp服务账号--api-key--introspect) | ✅ | MVP: /introspect + 管理 API |
+| [v0.3.0](#v030--多项目接入--配额) | ✅ | 多项目 scope + 配额 + 性能 |
+| v0.4.0 | ✅ | JWT + Opaque Token |
+| v0.5.0 | ✅ | User + Role 管理 |
+| v0.6.0 | ✅ | OAuth2 Authorization Code |
+| v0.7.0 | ✅ | Refresh Token + OAuth2 Clients |
+| v0.8.0 | ✅ | Metrics + OpenAPI 文档 |
+| v1.0.0 | ⬜ | API 稳定承诺 |
 
 ---
 
