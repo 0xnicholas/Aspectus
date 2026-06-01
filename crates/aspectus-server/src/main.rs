@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{middleware, Router, extract::DefaultBodyLimit, routing::{delete, get, post, put}};
+
+use aspectus_auth::password::PasswordHasher;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -11,7 +13,7 @@ use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
 use aspectus_server::config::Config;
 use aspectus_server::db;
 use aspectus_server::db::{
-    PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore,
+    PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
 };
 use aspectus_server::middleware::auth::service_token_auth;
 use aspectus_server::AppState;
@@ -59,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         service_account_store: Arc::new(PgServiceAccountStore::new(pool.clone())),
         api_key_store: api_key_store.clone(),
         audit_log_store: Arc::new(PgAuditLogStore::new(pool.clone())),
-        api_key_creator,
+        user_store: Arc::new(PgUserStore::new(pool.clone())),        api_key_creator,
         api_key_verifier,
         svc_token_verifier: svc_token_verifier.clone(),
         jwt_signer,
@@ -81,8 +83,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/tenants/{id}", get(aspectus_server::routes::tenants::get))
         .route("/tenants/{id}/quotas", put(aspectus_server::routes::tenants::update_quotas))
         .route("/service-accounts", post(aspectus_server::routes::service_accounts::create).get(aspectus_server::routes::service_accounts::list))
-        .route("/service-accounts/{id}", get(aspectus_server::routes::service_accounts::get))
-        .route("/api-keys", post(aspectus_server::routes::api_keys::create).get(aspectus_server::routes::api_keys::list))
+        .route("/users", post(aspectus_server::routes::users::create).get(aspectus_server::routes::users::list))
+        .route("/users/{id}", get(aspectus_server::routes::users::get))
+        .route("/users/{id}/suspend", put(aspectus_server::routes::users::suspend))        .route("/service-accounts/{id}", get(aspectus_server::routes::service_accounts::get))
+        .route("/users", post(aspectus_server::routes::users::create).get(aspectus_server::routes::users::list))
+        .route("/users/{id}", get(aspectus_server::routes::users::get))
+        .route("/users/{id}/suspend", put(aspectus_server::routes::users::suspend))        .route("/api-keys", post(aspectus_server::routes::api_keys::create).get(aspectus_server::routes::api_keys::list))
         .route("/api-keys/{id}", get(aspectus_server::routes::api_keys::get))
         .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
         .route("/token", post(aspectus_server::routes::token::issue))

@@ -5,6 +5,7 @@
 //! v0.4.0: JWT signing/verification + Opaque Token support.
 
 mod cache;
+pub mod password;
 pub mod jwt;
 mod token_verifier;
 

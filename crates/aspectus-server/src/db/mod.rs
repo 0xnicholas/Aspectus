@@ -6,12 +6,14 @@ pub mod audit_log_store;
 pub mod service_account_store;
 pub mod service_token_store;
 pub mod tenant_store;
+pub mod user_store;
 
 pub use api_key_store::PgApiKeyStore;
 pub use audit_log_store::PgAuditLogStore;
 pub use service_account_store::PgServiceAccountStore;
 pub use service_token_store::PgServiceTokenStore;
 pub use tenant_store::PgTenantStore;
+pub use user_store::PgUserStore;
 
 /// Initialize a PostgreSQL connection pool and verify connectivity.
 ///

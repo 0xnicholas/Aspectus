@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
-use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore};
+use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore, PgUserStore};
 
 /// Shared application state passed to all handlers via axum `State`.
 #[derive(Clone)]
@@ -28,5 +28,6 @@ pub struct AppState {
     pub svc_token_verifier: Arc<ServiceTokenVerifier>,
     pub jwt_signer: Arc<JwtSigner>,
     pub jwt_verifier: Arc<JwtVerifier>,
+    pub user_store: Arc<PgUserStore>,
     pub pool: sqlx::PgPool,
 }

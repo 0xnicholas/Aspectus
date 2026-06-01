@@ -88,3 +88,24 @@ pub trait ServiceTokenStore: Send + Sync {
         token_hash: &str,
     ) -> Result<Option<Project>, crate::error::CoreError>;
 }
+
+/// Persistence layer for User operations (v0.5.0).
+#[async_trait]
+pub trait UserStore: Send + Sync {
+    async fn create(
+        &self,
+        tenant_id: &str,
+        email: &str,
+        password_hash: &str,
+        display_name: Option<&str>,
+    ) -> Result<crate::user::User, crate::error::CoreError>;
+
+    async fn get_by_id(&self, id: &str) -> Result<Option<crate::user::User>, crate::error::CoreError>;
+
+    async fn list_by_tenant(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<crate::user::User>, crate::error::CoreError>;
+
+    async fn set_suspended(&self, id: &str, suspended: bool) -> Result<bool, crate::error::CoreError>;
+}
