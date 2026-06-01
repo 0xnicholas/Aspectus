@@ -86,7 +86,14 @@ pub async fn create(
 
             (StatusCode::CREATED, Json(user)).into_response()
         }
-        Err(e) => ProblemDetails::from(e).into_response(),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("users__email") || msg.contains("unique") {
+                ProblemDetails::validation_failed("Email already exists in this tenant", vec![]).into_response()
+            } else {
+                ProblemDetails::from(e).into_response()
+            }
+        }
     }
 }
 
