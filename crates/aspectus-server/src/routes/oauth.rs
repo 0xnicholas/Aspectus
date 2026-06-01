@@ -143,13 +143,15 @@ async fn issue_tokens(
 
     let project = client_id.parse().unwrap_or(aspectus_core::project::Project::Pandaria);
 
-    // Issue JWT access token
-    let access = match state.jwt_signer.sign(user_id, tenant_id, project, "", ttl) {
+    // Expand scope from user roles
+    let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id).await;
+
+    let access = match state.jwt_signer.sign(user_id, tenant_id, project, &scopes, ttl) {
         Ok(t) => t,
         Err(e) => return ProblemDetails::from(e).into_response(),
     };
 
-    // Issue refresh token (opaque)
+    // Issue refresh token
     let mut raw = [0u8; 32];
     getrandom::getrandom(&mut raw).unwrap_or_default();
     let refresh = format!("rt_{}", hex::encode(&raw));

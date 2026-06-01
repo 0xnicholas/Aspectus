@@ -2,8 +2,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::{middleware, Router, extract::DefaultBodyLimit, routing::{delete, get, post, put}};
-
-use aspectus_auth::password::PasswordHasher;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -23,10 +21,8 @@ async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
 
     tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "aspectus_server=info,tower_http=info".into()),
-        )
+        .with(tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "aspectus_server=info,tower_http=info".into()))
         .with(tracing_subscriber::fmt::layer())
         .init();
 
@@ -38,7 +34,6 @@ async fn main() -> anyhow::Result<()> {
     let jwt_cache = RedisCache::new(redis_client).await;
 
     let api_key_store = Arc::new(PgApiKeyStore::new(pool.clone()));
-
     let api_key_verifier = Arc::new(ApiKeyVerifier::new(api_key_store.clone(), auth_cache));
     let api_key_creator = Arc::new(ApiKeyCreator::new(api_key_store.clone()));
 
@@ -47,13 +42,11 @@ async fn main() -> anyhow::Result<()> {
         RedisCache::new(redis::Client::open(config.redis_url.as_str())?).await,
     ));
 
-    // JWT (optional — only if PEM keys configured)
     let jwt_signer = Arc::new(JwtSigner::from_env().unwrap_or_else(|_| {
-        tracing::warn!("JWT not configured (set JWT_PRIVATE_KEY_PEM)");
-        panic!("JWT_PRIVATE_KEY_PEM required for v0.4")
+        panic!("JWT_PRIVATE_KEY_PEM required")
     }));
     let jwt_verifier = Arc::new(JwtVerifier::from_env(jwt_cache).unwrap_or_else(|_| {
-        panic!("JWT_PUBLIC_KEY_PEM required for v0.4")
+        panic!("JWT_PUBLIC_KEY_PEM required")
     }));
 
     let state = AppState {
@@ -61,7 +54,8 @@ async fn main() -> anyhow::Result<()> {
         service_account_store: Arc::new(PgServiceAccountStore::new(pool.clone())),
         api_key_store: api_key_store.clone(),
         audit_log_store: Arc::new(PgAuditLogStore::new(pool.clone())),
-        user_store: Arc::new(PgUserStore::new(pool.clone())),        api_key_creator,
+        user_store: Arc::new(PgUserStore::new(pool.clone())),
+        api_key_creator,
         api_key_verifier,
         svc_token_verifier: svc_token_verifier.clone(),
         jwt_signer,
@@ -78,35 +72,35 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Management API (auth required)
     let mgmt = Router::new()
         .route("/tenants", post(aspectus_server::routes::tenants::create))
         .route("/tenants/{id}", get(aspectus_server::routes::tenants::get))
         .route("/tenants/{id}/quotas", put(aspectus_server::routes::tenants::update_quotas))
         .route("/service-accounts", post(aspectus_server::routes::service_accounts::create).get(aspectus_server::routes::service_accounts::list))
+        .route("/service-accounts/{id}", get(aspectus_server::routes::service_accounts::get))
         .route("/users", post(aspectus_server::routes::users::create).get(aspectus_server::routes::users::list))
         .route("/users/{id}", get(aspectus_server::routes::users::get))
-        .route("/users/{id}/suspend", put(aspectus_server::routes::users::suspend))        .route("/service-accounts/{id}", get(aspectus_server::routes::service_accounts::get))
+        .route("/users/{id}/suspend", put(aspectus_server::routes::users::suspend))
         .route("/roles", get(aspectus_server::routes::roles::list))
         .route("/users/{id}/roles", post(aspectus_server::routes::roles::assign))
-        .route("/users/{id}/roles/{role_id}", delete(aspectus_server::routes::roles::remove))        .route("/users", post(aspectus_server::routes::users::create).get(aspectus_server::routes::users::list))
-        .route("/users/{id}", get(aspectus_server::routes::users::get))
-        .route("/users/{id}/suspend", put(aspectus_server::routes::users::suspend))        .route("/api-keys", post(aspectus_server::routes::api_keys::create).get(aspectus_server::routes::api_keys::list))
-        .route("/roles", get(aspectus_server::routes::roles::list))
-        .route("/users/{id}/roles", post(aspectus_server::routes::roles::assign))
-        .route("/users/{id}/roles/{role_id}", delete(aspectus_server::routes::roles::remove))        .route("/api-keys/{id}", get(aspectus_server::routes::api_keys::get))
+        .route("/users/{id}/roles/{role_id}", delete(aspectus_server::routes::roles::remove))
+        .route("/api-keys", post(aspectus_server::routes::api_keys::create).get(aspectus_server::routes::api_keys::list))
+        .route("/api-keys/{id}", get(aspectus_server::routes::api_keys::get))
         .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
-        .route("/token", post(aspectus_server::routes::token::issue))
-        .route("/token/revoke", post(aspectus_server::routes::token::revoke))
+        .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))
         .layer(auth_layer.clone())
         .with_state(state.clone());
 
+    // Public + introspect routes
     let app = Router::new()
         .route("/introspect", post(aspectus_server::routes::introspect::handle))
+        .route_layer(auth_layer)
         .route("/health", get(aspectus_server::routes::health::handle))
         .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
         .route("/authorize", post(aspectus_server::routes::oauth::authorize))
-        .route("/token", post(aspectus_server::routes::oauth::token))        .route_layer(auth_layer)
-        .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))        .with_state(state)
+        .route("/oauth/token", post(aspectus_server::routes::oauth::token))
+        .with_state(state)
         .merge(mgmt)
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(1024 * 16))
@@ -116,10 +110,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Aspectus v{} starting on {}", env!("CARGO_PKG_VERSION"), addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
-
+    axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
 }
 

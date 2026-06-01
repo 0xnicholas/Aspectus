@@ -121,6 +121,12 @@ pub async fn create(
         .await
     {
         Ok(key) => {
+            // v0.7: Set user_id for user-owned keys (creator writes to service_account_id by default)
+            if owner_type == "user" {
+                let _ = sqlx::query("UPDATE api_keys SET user_id = $1, service_account_id = NULL WHERE id = $2")
+                    .bind(&owner_id).bind(&key.id).execute(&state.pool).await;
+            }
+
             let _ = state.audit_log_store.append(AuditLog {
                 id: generate_id(),
                 tenant_id: tenant_id.clone(),
