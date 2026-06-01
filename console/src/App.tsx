@@ -46,7 +46,7 @@ function Sidebar() {
           );
         })}
       </nav>
-      <div className="border-t border-white/10 p-4 text-xs text-gray-500">v0.8.0</div>
+      <div className="border-t border-white/10 p-4 text-xs text-gray-500">v0.1</div>
     </aside>
   );
 }
