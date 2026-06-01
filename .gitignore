@@ -21,3 +21,6 @@ pgdata/
 
 # Agent
 .superpowers/
+
+/_references
+node_modules/
