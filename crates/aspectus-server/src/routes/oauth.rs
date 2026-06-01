@@ -76,6 +76,7 @@ pub struct TokenRequest {
     #[serde(default)]
     code: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     client_id: Option<String>,
     #[serde(default)]
     refresh_token: Option<String>,

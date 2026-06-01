@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: aspectus
+      POSTGRES_PASSWORD: aspectus_prod
+      POSTGRES_DB: aspectus
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aspectus"]
+      interval: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass aspectus_redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "aspectus_redis", "ping"]
+      interval: 5s
+      retries: 5
+
+  aspectus:
+    build: .
+    ports:
+      - "3100:3100"
+    environment:
+      PORT: 3100
+      DATABASE_URL: postgresql://aspectus:aspectus_prod@postgres:5432/aspectus
+      REDIS_URL: redis://:aspectus_redis@redis:6379
+      RUST_LOG: aspectus_server=info,tower_http=info
+      DB_MAX_CONNECTIONS: 50
+      DB_MIN_CONNECTIONS: 10
+      JWT_TTL_SECONDS: 900
+      OPAQUE_TOKEN_TTL_SECONDS: 3600
+      # Uncomment for production JWT keys:
+      # JWT_PRIVATE_KEY_PEM: /run/secrets/jwt_private
+      # JWT_PUBLIC_KEY_PEM: /run/secrets/jwt_public
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
