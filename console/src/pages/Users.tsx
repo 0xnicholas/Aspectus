@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button, Input, Table, Modal, toast } from "../components/ui";
 import { api } from "../api/client";
 
 export function Users() {
@@ -6,53 +7,72 @@ export function Users() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [users, setUsers] = useState<any[]>([]);
+  const [suspendTarget, setSuspendTarget] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
 
   const listUsers = async () => {
-    if (!tenantId) return;
-    const data = await api.listUsers(tenantId);
-    setUsers(data);
+    if (!tenantId) return toast("Enter a tenant ID", "error");
+    setLoading(true);
+    try {
+      setUsers(await api.listUsers(tenantId));
+    } catch { toast("Failed to load users", "error"); }
+    setLoading(false);
   };
 
   const createUser = async () => {
-    if (!tenantId || !email || !password) return;
-    await api.createUser({ tenant_id: tenantId, email, password, display_name: email.split("@")[0] });
-    setEmail(""); setPassword("");
-    listUsers();
+    if (!tenantId || !email || !password) return toast("All fields required", "error");
+    if (password.length < 8) return toast("Password must be ≥8 chars", "error");
+    try {
+      await api.createUser({ tenant_id: tenantId, email, password, display_name: email.split("@")[0] });
+      toast("User created!");
+      setEmail(""); setPassword("");
+      listUsers();
+    } catch (e: any) { toast(e.message, "error"); }
   };
 
-  const toggleSuspend = async (id: string, current: boolean) => {
-    await api.suspendUser(id, !current);
-    listUsers();
+  const toggleSuspend = async () => {
+    if (!suspendTarget) return;
+    try {
+      await api.suspendUser(suspendTarget.id, !suspendTarget.is_suspended);
+      toast(suspendTarget.is_suspended ? "User unsuspended" : "User suspended");
+      setSuspendTarget(null);
+      listUsers();
+    } catch (e: any) { toast(e.message, "error"); }
   };
+
+  const columns = [
+    { key: "id", header: "ID", width: 180, render: (u: any) => <code style={{ fontSize: 11 }}>{u.id}</code> },
+    { key: "email", header: "Email" },
+    { key: "is_suspended", header: "Status", width: 100, render: (u: any) => u.is_suspended ? <Badge variant="danger">Suspended</Badge> : <Badge variant="success">Active</Badge> },
+    { key: "actions", header: "", width: 100, render: (u: any) => <Button size="sm" variant={u.is_suspended ? "primary" : "danger"} onClick={() => setSuspendTarget(u)}>{u.is_suspended ? "Unsuspend" : "Suspend"}</Button> },
+  ];
 
   return (
     <div>
       <h1>Users</h1>
-      <div style={{ display: "flex", gap: 8, marginTop: 16, flexWrap: "wrap" }}>
-        <input placeholder="Tenant ID" value={tenantId} onChange={e => setTenantId(e.target.value)} style={inputStyle} />
-        <button onClick={listUsers} style={btnStyle}>List</button>
+      <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <Input label="Tenant ID" value={tenantId} onChange={e => setTenantId(e.target.value)} />
+        <Button onClick={listUsers} loading={loading}>List</Button>
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-        <input placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} />
-        <input placeholder="Password (≥8)" value={password} type="password" onChange={e => setPassword(e.target.value)} style={inputStyle} />
-        <button onClick={createUser} style={btnStyle}>Create User</button>
+      <div style={{ display: "flex", gap: 12, marginTop: 16, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <Input label="Email" value={email} onChange={e => setEmail(e.target.value)} />
+        <Input label="Password (≥8)" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+        <Button onClick={createUser}>Create User</Button>
       </div>
-      <table style={{ width: "100%", marginTop: 24, borderCollapse: "collapse" }}>
-        <thead><tr style={{ textAlign: "left", borderBottom: "1px solid #ddd" }}><th>ID</th><th>Email</th><th>Suspended</th><th></th></tr></thead>
-        <tbody>
-          {users.map(u => (
-            <tr key={u.id} style={{ borderBottom: "1px solid #eee" }}>
-              <td style={{ padding: 8, fontSize: 12, fontFamily: "monospace" }}>{u.id}</td>
-              <td>{u.email}</td>
-              <td>{u.is_suspended ? "🚫" : "✅"}</td>
-              <td><button onClick={() => toggleSuspend(u.id, u.is_suspended)} style={{ ...btnStyle, fontSize: 12 }}>{u.is_suspended ? "Unsuspend" : "Suspend"}</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Table columns={columns} data={users} rowKey={u => u.id} emptyText={loading ? "Loading..." : "No users yet"} />
+      <Modal open={!!suspendTarget} title={suspendTarget?.is_suspended ? "Unsuspend User" : "Suspend User"}
+        message={`${suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"} ${suspendTarget?.email}?`}
+        confirmLabel={suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"}
+        variant={suspendTarget?.is_suspended ? "primary" : "danger"}
+        onConfirm={toggleSuspend} onCancel={() => setSuspendTarget(null)} />
     </div>
   );
 }
 
-const inputStyle: React.CSSProperties = { padding: "8px 12px", borderRadius: 6, border: "1px solid #ccc" };
-const btnStyle: React.CSSProperties = { padding: "8px 16px", borderRadius: 6, background: "#1a1a2e", color: "#fff", border: "none", cursor: "pointer" };
+function Badge({ variant, children }: { variant: string; children: React.ReactNode }) {
+  const colors: Record<string, React.CSSProperties> = {
+    success: { background: "#e8f5e9", color: "#2e7d32" },
+    danger: { background: "#fce4ec", color: "#c62828" },
+  };
+  return <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 500, ...colors[variant] }}>{children}</span>;
+}
