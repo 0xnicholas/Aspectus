@@ -8,7 +8,7 @@ use aspectus_core::{
 fn generate_id() -> String {
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).expect("RNG failure");
-    hex::encode(&bytes)[..21].to_string()
+    hex::encode(bytes)[..21].to_string()
 }
 
 pub struct PgServiceAccountStore {

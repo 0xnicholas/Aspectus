@@ -55,7 +55,7 @@ pub async fn authorize(
 
     let mut raw = [0u8; 32];
     getrandom::getrandom(&mut raw).unwrap_or_default();
-    let code = hex::encode(Sha256::digest(&raw));
+    let code = hex::encode(Sha256::digest(raw));
 
     sqlx::query(
         "INSERT INTO authorization_codes (code, user_id, client_id, redirect_uri, expires_at) \
@@ -154,7 +154,7 @@ async fn issue_tokens(
     // Issue refresh token
     let mut raw = [0u8; 32];
     getrandom::getrandom(&mut raw).unwrap_or_default();
-    let refresh = format!("rt_{}", hex::encode(&raw));
+    let refresh = format!("rt_{}", hex::encode(raw));
     let refresh_hash = hex::encode(Sha256::digest(refresh.as_bytes()));
 
     let _ = sqlx::query(

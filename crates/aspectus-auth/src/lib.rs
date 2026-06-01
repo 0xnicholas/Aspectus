@@ -67,7 +67,7 @@ fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
 pub(crate) fn generate_id() -> String {
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).unwrap_or_default();
-    hex::encode(&bytes)[..21].to_string()
+    hex::encode(bytes)[..21].to_string()
 }
 
 // ---- ApiKeyCreator ----
@@ -92,7 +92,7 @@ impl ApiKeyCreator {
         let id = generate_id();
         let mut raw = [0u8; 32];
         getrandom::getrandom(&mut raw).map_err(|e| CoreError::Internal(format!("RNG: {e}")))?;
-        let key = format!("pk_live_{}", hex::encode(&raw));
+        let key = format!("pk_live_{}", hex::encode(raw));
         let key_hash = sha256_hex(&raw);
         let key_prefix = key[..17].to_string();
         self.store.insert(
@@ -114,7 +114,7 @@ impl ApiKeyCreator {
         let id = generate_id();
         let mut raw = [0u8; 32];
         getrandom::getrandom(&mut raw).map_err(|e| CoreError::Internal(format!("RNG: {e}")))?;
-        let key = format!("ot_{}", hex::encode(&raw));
+        let key = format!("ot_{}", hex::encode(raw));
         let key_hash = sha256_hex(&raw);
         let key_prefix = key[..10].to_string();
         let expires_at = Some(Utc::now() + chrono::Duration::seconds(ttl_seconds as i64));
@@ -155,17 +155,15 @@ impl ApiKeyVerifier {
         let key_hash = sha256_hex(&raw);
         let cache_key = format!("introspect:{key_hash}");
         if let Some(cached) = self.cache.get_json::<IntrospectResponse>(&cache_key).await {
-            if let Some(exp) = cached.exp {
-                if exp < Utc::now().timestamp() { return IntrospectResponse::inactive(); }
-            }
+            if let Some(exp) = cached.exp
+                && exp < Utc::now().timestamp() { return IntrospectResponse::inactive(); }
             return cached;
         }
         match self.store.find_by_hash(&key_hash).await {
             Ok(Some(api_key)) => {
                 if api_key.revoked_at.is_some() { return IntrospectResponse::inactive(); }
-                if let Some(exp) = api_key.expires_at {
-                    if exp < Utc::now() { return IntrospectResponse::inactive(); }
-                }
+                if let Some(exp) = api_key.expires_at
+                    && exp < Utc::now() { return IntrospectResponse::inactive(); }
                 let response = build_response(&api_key);
                 let ttl = compute_cache_ttl(api_key.expires_at);
                 self.cache.set_json(&cache_key, &response, ttl).await;

@@ -5,7 +5,7 @@
 pub fn generate_id() -> String {
     let mut bytes = [0u8; 16];
     match getrandom::getrandom(&mut bytes) {
-        Ok(()) => hex::encode(&bytes)[..21].to_string(),
+        Ok(()) => hex::encode(bytes)[..21].to_string(),
         Err(e) => {
             tracing::error!(error = %e, "RNG failure in generate_id");
             String::new()

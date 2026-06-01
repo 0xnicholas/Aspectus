@@ -69,5 +69,5 @@ impl UserStore for PgUserStore {
 fn generate_id() -> String {
     let mut bytes = [0u8; 16];
     getrandom::getrandom(&mut bytes).unwrap_or_default();
-    hex::encode(&bytes)[..21].to_string()
+    hex::encode(bytes)[..21].to_string()
 }

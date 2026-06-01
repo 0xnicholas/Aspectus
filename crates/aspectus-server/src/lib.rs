@@ -13,7 +13,7 @@ pub mod util;
 
 use std::sync::Arc;
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, TokenVerifier};
+use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
 use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore, PgUserStore};
 
