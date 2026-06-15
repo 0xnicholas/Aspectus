@@ -63,7 +63,7 @@ async fn scope_expander_returns_scopes() {
         .bind(&rid).bind(&user.id).bind("role_agent_dev")
         .execute(&pool).await.unwrap();
 
-    let scopes = ScopeExpander::expand(&pool, &user.id).await;
+    let scopes = ScopeExpander::expand(&pool, &user.id, None).await;
     assert!(!scopes.is_empty(), "User should have scopes from role");
     assert!(scopes.contains("pandaria"), "Should contain pandaria scopes");
 }

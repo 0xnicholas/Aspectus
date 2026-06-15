@@ -235,7 +235,7 @@ async fn issue_tokens(
     let project = client_id.parse().unwrap_or(aspectus_core::project::Project::Pandaria);
 
     // Expand scope from user roles
-    let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id).await;
+    let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await;
 
     let access = match state.jwt_signer.sign(user_id, tenant_id, project, &scopes, ttl) {
         Ok(t) => t,

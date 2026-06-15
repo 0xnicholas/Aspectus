@@ -29,7 +29,7 @@ pub async fn handle(
         // v0.5.0: For User tokens, expand scope from Roles
         if response.identity_type == Some(aspectus_core::identity::IdentityType::User)
             && let Some(ref user_id) = response.user_id {
-                response.scope = Some(ScopeExpander::expand(&state.pool, user_id).await);
+                response.scope = Some(ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await);
             }
 
         if let Some(ref tenant_id) = response.tenant_id

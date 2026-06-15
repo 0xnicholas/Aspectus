@@ -16,7 +16,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier};
+use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, RedisCache};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
 use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore, PgUserStore,
     PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore};
@@ -37,5 +37,7 @@ pub struct AppState {
     pub auth_code_store: Arc<PgAuthorizationCodeStore>,
     pub refresh_token_store: Arc<PgRefreshTokenStore>,
     pub oauth_client_store: Arc<PgOAuth2ClientStore>,
+    /// Redis cache for scope expansion (TTL=60s).
+    pub scope_cache: Arc<RedisCache>,
     pub pool: sqlx::PgPool,
 }

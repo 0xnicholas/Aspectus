@@ -47,6 +47,9 @@ async fn main() -> anyhow::Result<()> {
     let svc_token_cache = RedisCache::new(redis_client.clone()).await
         .context("Failed to create service token Redis cache")?;
 
+    let scope_cache = Arc::new(RedisCache::new(redis_client.clone()).await
+        .context("Failed to create scope expansion Redis cache")?);
+
     let svc_token_verifier = Arc::new(ServiceTokenVerifier::new(
         Arc::new(PgServiceTokenStore::new(pool.clone())),
         svc_token_cache,
@@ -66,6 +69,7 @@ async fn main() -> anyhow::Result<()> {
         auth_code_store: Arc::new(PgAuthorizationCodeStore::new(pool.clone())),
         refresh_token_store: Arc::new(PgRefreshTokenStore::new(pool.clone())),
         oauth_client_store: Arc::new(PgOAuth2ClientStore::new(pool.clone())),
+        scope_cache: scope_cache.clone(),
         api_key_creator,
         api_key_verifier,
         svc_token_verifier: svc_token_verifier.clone(),

@@ -55,7 +55,7 @@ async fn user_role_scope_and_oauth2() {
     sqlx::query("INSERT INTO users_roles (id, user_id, role_id) VALUES ($1,$2,$3)")
         .bind(unique_id("ur")).bind(&user.id).bind("role_agent_dev").execute(&p).await.unwrap();
 
-    let scopes = ScopeExpander::expand(&p, &user.id).await;
+    let scopes = ScopeExpander::expand(&p, &user.id, None).await;
     assert!(!scopes.is_empty());
     assert!(scopes.contains("pandaria"));
 

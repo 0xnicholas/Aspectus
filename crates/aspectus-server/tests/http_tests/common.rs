@@ -58,6 +58,8 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
     let jwt_signer = Arc::new(JwtSigner::from_env()?);
     let jwt_verifier = Arc::new(JwtVerifier::from_env(jwt_cache)?);
 
+    let scope_cache = Arc::new(RedisCache::new(redis::Client::open(redis_url.as_str())?).await?);
+
     let state = AppState {
         tenant_store: Arc::new(PgTenantStore::new(pool.clone())),
         service_account_store: Arc::new(PgServiceAccountStore::new(pool.clone())),
@@ -67,6 +69,7 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
         auth_code_store: Arc::new(PgAuthorizationCodeStore::new(pool.clone())),
         refresh_token_store: Arc::new(PgRefreshTokenStore::new(pool.clone())),
         oauth_client_store: Arc::new(PgOAuth2ClientStore::new(pool.clone())),
+        scope_cache,
         api_key_creator,
         api_key_verifier,
         svc_token_verifier: svc_verifier.clone(),

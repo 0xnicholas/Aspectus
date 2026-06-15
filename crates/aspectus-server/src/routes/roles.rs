@@ -13,6 +13,7 @@ use aspectus_core::{audit_log::AuditLog, identity::IdentityType, role::Role};
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
 use crate::AppState;
+use crate::scope_expander::ScopeExpander;
 use aspectus_core::store::AuditLogStore;
 
 #[derive(Deserialize)]
@@ -46,6 +47,9 @@ pub async fn assign(
     .await
     {
         Ok(_) => {
+            // Invalidate scope cache for this user
+            ScopeExpander::invalidate(&state.scope_cache, &user_id).await;
+
             let _ = state.audit_log_store.append(AuditLog {
                 id: generate_id(), tenant_id: String::new(),
                 actor_id: "mgmt".into(), actor_type: IdentityType::ServiceAccount,
@@ -77,6 +81,9 @@ pub async fn remove(
         .await
     {
         Ok(r) if r.rows_affected() > 0 => {
+            // Invalidate scope cache for this user
+            ScopeExpander::invalidate(&state.scope_cache, &user_id).await;
+
             let _ = state.audit_log_store.append(AuditLog {
                 id: generate_id(), tenant_id: String::new(),
                 actor_id: "mgmt".into(), actor_type: IdentityType::ServiceAccount,
