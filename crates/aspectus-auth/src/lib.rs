@@ -66,8 +66,18 @@ fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
 
 pub(crate) fn generate_id() -> String {
     let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).unwrap_or_default();
-    hex::encode(bytes)[..21].to_string()
+    match getrandom::getrandom(&mut bytes) {
+        Ok(()) => hex::encode(bytes)[..21].to_string(),
+        Err(e) => {
+            tracing::warn!(error = %e, "RNG failure in auth generate_id — using fallback");
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let ts = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{ts:021}")
+        }
+    }
 }
 
 // ---- ApiKeyCreator ----

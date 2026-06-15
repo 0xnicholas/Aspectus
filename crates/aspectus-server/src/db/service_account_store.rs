@@ -1,15 +1,10 @@
 use async_trait::async_trait;
 use sqlx::PgPool;
 
+use crate::util::generate_id;
 use aspectus_core::{
     error::CoreError, service_account::ServiceAccount, store::ServiceAccountStore,
 };
-
-fn generate_id() -> Result<String, CoreError> {
-    let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).map_err(|e| CoreError::Internal(format!("RNG: {e}")))?;
-    Ok(hex::encode(bytes)[..21].to_string())
-}
 
 pub struct PgServiceAccountStore {
     pool: PgPool,
@@ -29,7 +24,7 @@ impl ServiceAccountStore for PgServiceAccountStore {
         label: &str,
         description: Option<&str>,
     ) -> Result<ServiceAccount, CoreError> {
-        let id = generate_id()?;
+        let id = generate_id();
 
         sqlx::query_as::<_, ServiceAccount>(
             "INSERT INTO service_accounts (id, tenant_id, label, description) \
