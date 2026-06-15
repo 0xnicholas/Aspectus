@@ -201,19 +201,18 @@ pub async fn token(
                     // Token not found or already revoked — check for replay attack
                     if let Ok(Some((user_id, is_revoked))) =
                         state.refresh_token_store.find_by_hash_any(&hash).await
+                        && is_revoked
                     {
-                        if is_revoked {
-                            // Replay detected: revoke all tokens for this user
-                            let count = state.refresh_token_store
-                                .revoke_all_for_user(&user_id)
-                                .await
-                                .unwrap_or(0);
-                            tracing::warn!(
-                                user_id = %user_id,
-                                revoked = count,
-                                "Refresh token replay detected — revoked all user tokens"
-                            );
-                        }
+                        // Replay detected: revoke all tokens for this user
+                        let count = state.refresh_token_store
+                            .revoke_all_for_user(&user_id)
+                            .await
+                            .unwrap_or(0);
+                        tracing::warn!(
+                            user_id = %user_id,
+                            revoked = count,
+                            "Refresh token replay detected — revoked all user tokens"
+                        );
                     }
                     ProblemDetails::unauthorized("Invalid or expired refresh_token", "/token").into_response()
                 }
