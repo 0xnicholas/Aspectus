@@ -1,0 +1,165 @@
+# Prometheus Alerting Rules for Aspectus
+#
+# Apply: kubectl apply -f docs/operations/prometheus-alerts.yaml
+# Or include in your PrometheusRule custom resource.
+
+groups:
+  - name: aspectus
+    rules:
+      # ── Introspection (the hot path) ──
+
+      - alert: AspectusIntrospectHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{
+            service="aspectus",
+            route="/introspect"
+          }[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "Introspect p95 latency > 10ms"
+          description: |
+            POST /introspect p95 = {{ $value }}s (threshold: 10ms).
+            This is the hot path — every ecosystem request hits it.
+            Check: Redis connectivity, DB connection pool saturation,
+            node CPU throttling.
+
+      - alert: AspectusIntrospectErrorRate
+        expr: |
+          rate(introspect_total{result="error"}[5m]) /
+          rate(introspect_total[5m]) > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          component: aspectus
+        annotations:
+          summary: "Introspect error rate > 1%"
+          description: |
+            Introspect errors at {{ $value | humanizePercentage }}.
+            This likely means DB or Redis is unreachable.
+            Action: Check DB pool, Redis connectivity, node health.
+
+      # ── Database ──
+
+      - alert: AspectusDatabaseConnectionPoolExhausted
+        expr: |
+          db_connections_active{service="aspectus"} /
+          db_connections_max{service="aspectus"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "DB connection pool > 90% utilized"
+          description: |
+            {{ $value | humanizePercentage }} of DB connections in use.
+            May need to increase max_connections or scale up DB instance.
+
+      - alert: AspectusDatabaseConnectionPoolSaturated
+        expr: |
+          db_connections_active{service="aspectus"} /
+          db_connections_max{service="aspectus"} > 0.98
+        for: 1m
+        labels:
+          severity: critical
+          component: aspectus
+        annotations:
+          summary: "DB connection pool saturated (98%+)"
+          description: |
+            Database pool is at capacity. Requests may be queued or rejected.
+            Immediate action: scale up (increase dbMaxConnections) or
+            investigate connection leak.
+
+      # ── Redis ──
+
+      - alert: AspectusRedisUnavailable
+        expr: |
+          redis_up{service="aspectus"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "Redis is unreachable"
+          description: |
+            Redis connectivity lost. Aspectus continues serving via
+            PostgreSQL fallback (degraded mode — higher latency).
+            Check Redis pod/instance, network, memory.
+
+      - alert: AspectusRedisDown
+        expr: |
+          redis_up{service="aspectus"} == 0
+        for: 10m
+        labels:
+          severity: critical
+          component: aspectus
+        annotations:
+          summary: "Redis has been down for 10+ minutes"
+          description: |
+            Extended Redis outage. Every /introspect call is hitting
+            PostgreSQL. Latency will be elevated. Urgent action required.
+
+      # ── Rate Limiting ──
+
+      - alert: AspectusHighRateLimitHits
+        expr: |
+          rate(rate_limit_exceeded_total{service="aspectus"}[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "Rate limit hits exceeding threshold"
+          description: |
+            {{ $value | humanize }}/s rate limit hits on endpoint {{ $labels.route }}.
+            May indicate abuse or misconfigured client.
+            Check logs for the source IP/service token.
+
+      # ── OAuth2 ──
+
+      - alert: AspectusOAuth2HighFailureRate
+        expr: |
+          rate(oauth_authorize_errors_total[10m]) /
+          rate(oauth_authorize_total[10m]) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "OAuth2 authorize failure rate > 30%"
+          description: |
+            High failure rate on /authorize. Possible brute-force attack
+            or client misconfiguration. Check source IPs.
+
+      # ── Pod health ──
+
+      - alert: AspectusPodRestartingFrequently
+        expr: |
+          rate(kube_pod_container_status_restarts_total{
+            container="aspectus"
+          }[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "Aspectus pod is restarting"
+          description: |
+            Pod restarts detected. Check logs for panic, OOMKill,
+            or liveness probe failures.
+
+      - alert: AspectusReplicasMismatch
+        expr: |
+          kube_deployment_spec_replicas{deployment=~"aspectus.*"} !=
+          kube_deployment_status_replicas_available{deployment=~"aspectus.*"}
+        for: 10m
+        labels:
+          severity: warning
+          component: aspectus
+        annotations:
+          summary: "Aspectus deployment has unavailable replicas"
+          description: |
+            Desired {{ $labels.kube_deployment_spec_replicas }} replicas
+            but only {{ $labels.kube_deployment_status_replicas_available }} available.

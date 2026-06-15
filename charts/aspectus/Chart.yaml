@@ -1,0 +1,15 @@
+apiVersion: v2
+name: aspectus
+description: Unified identity and multi-tenant management service for the Pandaria ecosystem
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - identity
+  - oauth2
+  - multi-tenant
+  - introspection
+  - pandaria
+maintainers:
+  - name: Pandaria Team
+    email: dev@pandaria.dev
