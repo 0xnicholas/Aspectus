@@ -9,6 +9,7 @@ use crate::error::CoreError;
 /// New projects require a code change (ADR-010).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
 #[sqlx(type_name = "project", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum Project {
     Pandaria,
     Tavern,

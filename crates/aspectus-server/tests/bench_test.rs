@@ -20,7 +20,7 @@ async fn introspect_cold_path_bench() {
 
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let redis_client = redis::Client::open(redis_url.as_str()).unwrap();
-    let cache = RedisCache::new(redis_client).await;
+    let cache = RedisCache::new(redis_client).await.expect("Redis connection failed");
 
     let tenant_store = PgTenantStore::new(pool.clone());
     let sa_store = PgServiceAccountStore::new(pool.clone());

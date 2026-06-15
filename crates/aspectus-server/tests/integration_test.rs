@@ -44,7 +44,7 @@ async fn setup() -> (
 
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let redis_client = redis::Client::open(redis_url.as_str()).unwrap();
-    let cache = RedisCache::new(redis_client).await;
+    let cache = RedisCache::new(redis_client).await.expect("Redis connection failed");
 
     // Seed service token if not exists
     let _ = sqlx::query(

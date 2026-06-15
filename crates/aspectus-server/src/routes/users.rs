@@ -56,10 +56,10 @@ pub async fn create(
     if !validate_email(&req.email) {
         return ProblemDetails::validation_failed("Invalid email format", vec![]).into_response();
     }
-    if let Some(ref display_name) = req.display_name {
-        if !validate_display_name(display_name) {
-            return ProblemDetails::validation_failed("Invalid display name", vec![]).into_response();
-        }
+    if let Some(ref display_name) = req.display_name
+        && !validate_display_name(display_name)
+    {
+        return ProblemDetails::validation_failed("Invalid display name", vec![]).into_response();
     }
     if req.password.len() < 8 {
         return ProblemDetails::validation_failed("Password must be at least 8 characters", vec![])

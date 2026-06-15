@@ -16,3 +16,6 @@ pub mod service_account;
 pub mod store;
 pub mod tenant;
 pub mod user;
+
+#[cfg(test)]
+mod tests;

@@ -265,4 +265,80 @@ mod tests {
         let far_future = Utc::now() + chrono::Duration::seconds(10000);
         assert_eq!(compute_cache_ttl(Some(far_future)), 300);
     }
+
+    #[test]
+    fn build_response_sets_api_key_format() {
+        let key = ApiKey {
+            id: "k1".into(), tenant_id: "t1".into(), service_account_id: "sa1".into(),
+            project: Project::Pandaria, key_hash: "h".into(), key_prefix: "p".into(),
+            scopes: vec!["pandaria:session:create".into()],
+            expires_at: None, revoked_at: None, created_at: Utc::now(),
+        };
+        let resp = build_response(&key);
+        assert!(resp.active);
+        assert_eq!(resp.token_format.as_deref(), Some("api_key"));
+        assert_eq!(resp.identity_type, Some(IdentityType::ServiceAccount));
+        assert_eq!(resp.client_id.as_deref(), Some("pandaria"));
+        assert!(resp.scope.as_deref().unwrap().contains("pandaria:session:create"));
+    }
+
+    #[test]
+    fn build_response_with_expiry() {
+        let exp = Utc::now() + chrono::Duration::hours(24);
+        let key = ApiKey {
+            id: "k2".into(), tenant_id: "t2".into(), service_account_id: "sa2".into(),
+            project: Project::Tavern, key_hash: "h2".into(), key_prefix: "p2".into(),
+            scopes: vec![], expires_at: Some(exp), revoked_at: None, created_at: Utc::now(),
+        };
+        let resp = build_response(&key);
+        assert!(resp.active);
+        assert!(resp.exp.is_some());
+        assert_eq!(resp.token_format.as_deref(), Some("api_key"));
+    }
+
+    #[test]
+    fn generate_id_is_not_empty() {
+        let id = generate_id();
+        assert!(!id.is_empty());
+        assert_eq!(id.len(), 21);
+    }
+
+    #[test]
+    fn generate_id_is_unique() {
+        let ids: std::collections::HashSet<_> = (0..100).map(|_| generate_id()).collect();
+        assert_eq!(ids.len(), 100, "100 generated IDs must all be unique");
+    }
+
+    #[test]
+    fn inactive_response_has_no_fields() {
+        let r = IntrospectResponse::inactive();
+        assert!(!r.active);
+        assert!(r.tenant_id.is_none());
+        assert!(r.user_id.is_none());
+        assert!(r.identity_type.is_none());
+        assert!(r.client_id.is_none());
+        assert!(r.scope.is_none());
+        assert!(r.token_type.is_none());
+        assert!(r.exp.is_none());
+        assert!(r.quotas.is_none());
+        assert!(r.token_format.is_none());
+    }
+
+    #[test]
+    fn extract_raw_jwt_is_none() {
+        // JWT tokens should NOT be processed by ApiKeyVerifier
+        assert!(extract_raw_from_key("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0").is_none());
+    }
+
+    #[test]
+    fn extract_raw_empty_token() {
+        assert!(extract_raw_from_key("").is_none());
+    }
+
+    #[test]
+    fn sha256_hex_is_lowercase() {
+        let result = sha256_hex(b"test");
+        assert_eq!(result, result.to_lowercase());
+        assert_eq!(result.len(), 64);
+    }
 }

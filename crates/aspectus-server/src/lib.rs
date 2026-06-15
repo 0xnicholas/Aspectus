@@ -11,6 +11,9 @@ pub mod middleware;
 pub mod routes;
 pub mod util;
 
+#[cfg(test)]
+mod tests;
+
 use std::sync::Arc;
 
 use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier};
