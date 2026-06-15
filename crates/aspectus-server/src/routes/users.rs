@@ -21,6 +21,16 @@ use aspectus_auth::password::PasswordHasher;
 
 use crate::util::generate_id;
 
+/// Validate email format (basic check).
+fn validate_email(email: &str) -> bool {
+    email.contains('@') && email.len() <= 256 && !email.contains('\0')
+}
+
+/// Validate display name: ≤128 chars, no control characters.
+fn validate_display_name(name: &str) -> bool {
+    name.len() <= 128 && !name.chars().any(|c| c.is_control())
+}
+
 #[derive(Deserialize)]
 pub struct CreateUserRequest {
     tenant_id: String,
@@ -43,6 +53,14 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateUserRequest>,
 ) -> impl IntoResponse {
+    if !validate_email(&req.email) {
+        return ProblemDetails::validation_failed("Invalid email format", vec![]).into_response();
+    }
+    if let Some(ref display_name) = req.display_name {
+        if !validate_display_name(display_name) {
+            return ProblemDetails::validation_failed("Invalid display name", vec![]).into_response();
+        }
+    }
     if req.password.len() < 8 {
         return ProblemDetails::validation_failed("Password must be at least 8 characters", vec![])
             .into_response();

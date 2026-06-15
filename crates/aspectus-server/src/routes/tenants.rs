@@ -27,6 +27,18 @@ pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateTenantRequest>,
 ) -> impl IntoResponse {
+    // Validate tenant name: non-empty, ≤128 chars, [a-zA-Z0-9_-] only
+    if req.name.is_empty() || req.name.len() > 128 {
+        return ProblemDetails::validation_failed(
+            "Tenant name must be between 1 and 128 characters", vec![],
+        ).into_response();
+    }
+    if !req.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        return ProblemDetails::validation_failed(
+            "Tenant name may only contain letters, numbers, underscore, and hyphen", vec![],
+        ).into_response();
+    }
+
     match state.tenant_store.create(&req.name).await {
         Ok(tenant) => {
             let _ = state.audit_log_store.append(AuditLog {

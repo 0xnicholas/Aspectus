@@ -19,6 +19,8 @@ use crate::error::ProblemDetails;
 use crate::util::generate_id;
 use crate::AppState;
 
+const MAX_SCOPES_PER_KEY: usize = 64;
+
 #[derive(Deserialize)]
 pub struct CreateApiKeyRequest {
     #[serde(default)]
@@ -62,6 +64,13 @@ pub async fn create(
     if !["user", "service_account"].contains(&owner_type) {
         return ProblemDetails::validation_failed(
             format!("Invalid owner_type: {owner_type}"), vec![],
+        ).into_response();
+    }
+
+    // v0.9.0: Scope count limit
+    if req.scopes.len() > MAX_SCOPES_PER_KEY {
+        return ProblemDetails::validation_failed(
+            format!("Too many scopes: max {MAX_SCOPES_PER_KEY}"), vec![],
         ).into_response();
     }
 

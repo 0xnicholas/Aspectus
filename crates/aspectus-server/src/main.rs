@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use axum::{middleware, Router, extract::DefaultBodyLimit, routing::{delete, get, post, put}};
+use axum::http::header;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -16,6 +17,7 @@ use aspectus_server::db::{
     PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore,
 };
 use aspectus_server::middleware::auth::service_token_auth;
+use aspectus_server::middleware::rate_limit::{self, RateLimiter};
 use aspectus_server::AppState;
 
 #[tokio::main]
@@ -81,7 +83,18 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Management API (auth required)
+    // Rate limiters (per-endpoint tuning)
+    let authorize_limiter = RateLimiter::new(5, 60);     // 5/min per IP
+    let token_limiter = RateLimiter::new(30, 60);        // 30/min per IP
+    let introspect_limiter = RateLimiter::new(10000, 60); // 10000/min per service token
+    let mgmt_limiter = RateLimiter::new(100, 60);         // 100/min per service token
+
+    let authorize_rl = authorize_limiter.clone();
+    let token_rl = token_limiter.clone();
+    let introspect_rl = introspect_limiter.clone();
+    let mgmt_rl = mgmt_limiter.clone();
+
+    // Management API (auth required + rate limited)
     let mgmt = Router::new()
         .route("/tenants", post(aspectus_server::routes::tenants::create))
         .route("/tenants/{id}", get(aspectus_server::routes::tenants::get))
@@ -99,20 +112,39 @@ async fn main() -> anyhow::Result<()> {
         .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
         .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))
         .layer(auth_layer.clone())
+        .layer(middleware::from_fn(move |req, next| {
+            rate_limit::rate_limit_layer(mgmt_rl.clone(), rate_limit::service_token_key, req, next)
+        }))
         .with_state(state.clone());
 
-    // Public + introspect routes
+    // Public + introspect routes (with per-route rate limiting)
     let app = Router::new()
-        .route("/introspect", post(aspectus_server::routes::introspect::handle))
+        .route("/introspect", post(aspectus_server::routes::introspect::handle)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(introspect_rl.clone(), rate_limit::service_token_key, req, next)
+            }))
+        )
         .route_layer(auth_layer)
         .route("/health", get(aspectus_server::routes::health::handle))
-        .route("/metrics", get(aspectus_server::routes::metrics::handle))        .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
-        .route("/authorize", post(aspectus_server::routes::oauth::authorize))
-        .route("/oauth/token", post(aspectus_server::routes::oauth::token))
+        .route("/metrics", get(aspectus_server::routes::metrics::handle))
+        .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
+        .route("/authorize", post(aspectus_server::routes::oauth::authorize)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(authorize_rl.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(4096))
+        )
+        .route("/oauth/token", post(aspectus_server::routes::oauth::token)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(token_rl.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(4096))
+        )
         .with_state(state)
         .merge(mgmt)
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(1024 * 16))
+        .layer(middleware::from_fn(add_security_headers))
         .layer(TraceLayer::new_for_http());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
@@ -121,6 +153,14 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).with_graceful_shutdown(shutdown_signal()).await?;
     Ok(())
+}
+
+async fn add_security_headers(req: axum::extract::Request, next: middleware::Next) -> axum::response::Response {
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+    headers.insert(header::X_CONTENT_TYPE_OPTIONS, "nosniff".parse().unwrap());
+    headers.insert(header::X_FRAME_OPTIONS, "DENY".parse().unwrap());
+    response
 }
 
 async fn shutdown_signal() {
