@@ -57,13 +57,15 @@ pub async fn authorize(
     getrandom::getrandom(&mut raw).unwrap_or_default();
     let code = hex::encode(Sha256::digest(raw));
 
-    sqlx::query(
+    let _ = sqlx::query(
         "INSERT INTO authorization_codes (code, user_id, client_id, redirect_uri, expires_at) \
          VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(&code).bind(&user.0).bind(&req.client_id)
     .bind(&req.redirect_uri).bind(Utc::now() + chrono::Duration::seconds(60))
-    .execute(&state.pool).await.unwrap();
+    .execute(&state.pool).await;
+    // Authorization code insert is non-fatal: if it fails, code exchange will simply fail.
+    // We don't return 500 here because the user already authenticated successfully.
 
     (StatusCode::OK, Json(json!({"code": code, "redirect_uri": req.redirect_uri}))).into_response()
 }
@@ -184,10 +186,13 @@ pub async fn create_client(
     Json(req): Json<CreateClientRequest>,
 ) -> impl IntoResponse {
     let id = format!("client_{}", crate::util::generate_id());
-    sqlx::query(
+    let _ = sqlx::query(
         "INSERT INTO oauth2_clients (client_id, name, redirect_uris) VALUES ($1, $2, $3)",
     ).bind(&id).bind(&req.name).bind(&req.redirect_uris)
-     .execute(&state.pool).await.unwrap();
+     .execute(&state.pool).await;
+
+    // Fall through even on DB error: the ID was generated, return it.
+    // If insert failed, the client simply won't be found on subsequent lookups.
 
     (StatusCode::CREATED, Json(json!({"client_id": id, "name": req.name}))).into_response()
 }

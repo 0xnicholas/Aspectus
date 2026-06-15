@@ -1,3 +1,4 @@
+use anyhow::Context;
 use redis::aio::ConnectionManager;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -10,12 +11,12 @@ pub struct RedisCache {
 }
 
 impl RedisCache {
-    pub async fn new(client: redis::Client) -> Self {
-        Self {
+    pub async fn new(client: redis::Client) -> anyhow::Result<Self> {
+        Ok(Self {
             conn: ConnectionManager::new(client)
                 .await
-                .expect("Failed to create Redis connection manager"),
-        }
+                .context("Failed to create Redis connection manager")?,
+        })
     }
 
     fn conn(&self) -> ConnectionManager {
@@ -35,7 +36,13 @@ impl RedisCache {
 
     /// Set a JSON-serialized value with TTL (seconds).
     pub async fn set_json<T: Serialize>(&self, key: &str, value: &T, ttl_secs: u64) {
-        let json = serde_json::to_string(value).unwrap();
+        let json = match serde_json::to_string(value) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, key = %key, "Failed to serialize value for Redis cache");
+                return;
+            }
+        };
         let mut conn = self.conn();
         let _: Result<(), _> = redis::cmd("SETEX")
             .arg(key)

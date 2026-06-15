@@ -97,7 +97,7 @@ impl IntoResponse for ProblemDetails {
         *response.status_mut() = status;
         response.headers_mut().insert(
             axum::http::header::CONTENT_TYPE,
-            "application/problem+json".parse().unwrap(),
+            axum::http::HeaderValue::from_static("application/problem+json"),
         );
         response
     }

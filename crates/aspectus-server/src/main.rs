@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use anyhow::Context;
 use axum::{middleware, Router, extract::DefaultBodyLimit, routing::{delete, get, post, put}};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -29,25 +30,29 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let pool = db::init_pool(&config).await?;
 
-    let redis_client = redis::Client::open(config.redis_url.as_str())?;
-    let auth_cache = RedisCache::new(redis_client.clone()).await;
-    let jwt_cache = RedisCache::new(redis_client).await;
+    let redis_client = redis::Client::open(config.redis_url.as_str())
+        .context("Failed to create Redis client")?;
+    let auth_cache = RedisCache::new(redis_client.clone()).await
+        .context("Failed to create auth Redis cache")?;
+    let jwt_cache = RedisCache::new(redis_client.clone()).await
+        .context("Failed to create JWT Redis cache")?;
 
     let api_key_store = Arc::new(PgApiKeyStore::new(pool.clone()));
     let api_key_verifier = Arc::new(ApiKeyVerifier::new(api_key_store.clone(), auth_cache));
     let api_key_creator = Arc::new(ApiKeyCreator::new(api_key_store.clone()));
 
+    let svc_token_cache = RedisCache::new(redis_client.clone()).await
+        .context("Failed to create service token Redis cache")?;
+
     let svc_token_verifier = Arc::new(ServiceTokenVerifier::new(
         Arc::new(PgServiceTokenStore::new(pool.clone())),
-        RedisCache::new(redis::Client::open(config.redis_url.as_str())?).await,
+        svc_token_cache,
     ));
 
-    let jwt_signer = Arc::new(JwtSigner::from_env().unwrap_or_else(|_| {
-        panic!("JWT_PRIVATE_KEY_PEM required")
-    }));
-    let jwt_verifier = Arc::new(JwtVerifier::from_env(jwt_cache).unwrap_or_else(|_| {
-        panic!("JWT_PUBLIC_KEY_PEM required")
-    }));
+    let jwt_signer = Arc::new(JwtSigner::from_env()
+        .context("JWT_PRIVATE_KEY_PEM required — provide via env var or file")?);
+    let jwt_verifier = Arc::new(JwtVerifier::from_env(jwt_cache)
+        .context("JWT_PUBLIC_KEY_PEM required — provide via env var or file")?);
 
     let state = AppState {
         tenant_store: Arc::new(PgTenantStore::new(pool.clone())),
