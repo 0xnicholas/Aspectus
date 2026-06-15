@@ -13,6 +13,7 @@ use aspectus_server::config::Config;
 use aspectus_server::db;
 use aspectus_server::db::{
     PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
+    PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore,
 };
 use aspectus_server::middleware::auth::service_token_auth;
 use aspectus_server::AppState;
@@ -60,6 +61,9 @@ async fn main() -> anyhow::Result<()> {
         api_key_store: api_key_store.clone(),
         audit_log_store: Arc::new(PgAuditLogStore::new(pool.clone())),
         user_store: Arc::new(PgUserStore::new(pool.clone())),
+        auth_code_store: Arc::new(PgAuthorizationCodeStore::new(pool.clone())),
+        refresh_token_store: Arc::new(PgRefreshTokenStore::new(pool.clone())),
+        oauth_client_store: Arc::new(PgOAuth2ClientStore::new(pool.clone())),
         api_key_creator,
         api_key_verifier,
         svc_token_verifier: svc_token_verifier.clone(),

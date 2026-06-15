@@ -109,3 +109,74 @@ pub trait UserStore: Send + Sync {
 
     async fn set_suspended(&self, id: &str, suspended: bool) -> Result<bool, crate::error::CoreError>;
 }
+
+/// Persistence layer for OAuth2 authorization codes (v0.9.0).
+#[async_trait]
+pub trait AuthorizationCodeStore: Send + Sync {
+    async fn create_code(
+        &self,
+        code: &str,
+        user_id: &str,
+        client_id: &str,
+        redirect_uri: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), crate::error::CoreError>;
+
+    /// Atomically marks a code as used and returns its payload.
+    /// Returns None if the code is invalid, expired, or already used.
+    async fn exchange_code(
+        &self,
+        code: &str,
+    ) -> Result<Option<(String, String, String)>, crate::error::CoreError>;
+    // Returns (user_id, client_id, redirect_uri)
+}
+
+/// Persistence layer for OAuth2 refresh tokens (v0.9.0).
+#[async_trait]
+pub trait RefreshTokenStore: Send + Sync {
+    async fn create(
+        &self,
+        token_hash: &str,
+        user_id: &str,
+        client_id: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<(), crate::error::CoreError>;
+
+    /// Atomically revokes and returns the refresh token payload.
+    /// Returns None if the token is invalid, expired, or already revoked.
+    async fn rotate(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<(String, String, String)>, crate::error::CoreError>;
+    // Returns (user_id, client_id, old_hash)
+
+    /// Revoke all active refresh tokens for a user (replay attack response).
+    async fn revoke_all_for_user(&self, user_id: &str) -> Result<u64, crate::error::CoreError>;
+
+    /// Look up a token by hash regardless of revocation status (for replay detection).
+    async fn find_by_hash_any(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<(String, bool)>, crate::error::CoreError>;
+    // Returns (user_id, is_revoked)
+}
+
+/// Persistence layer for OAuth2 client registration (v0.9.0).
+#[async_trait]
+pub trait OAuth2ClientStore: Send + Sync {
+    async fn create(
+        &self,
+        client_id: &str,
+        name: &str,
+        redirect_uris: &[String],
+    ) -> Result<(), crate::error::CoreError>;
+
+    async fn list(&self) -> Result<Vec<(String, String, Vec<String>)>, crate::error::CoreError>;
+    // Returns Vec<(client_id, name, redirect_uris)>
+
+    async fn validate_redirect_uri(
+        &self,
+        client_id: &str,
+        redirect_uri: &str,
+    ) -> Result<bool, crate::error::CoreError>;
+}
