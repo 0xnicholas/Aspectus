@@ -95,7 +95,7 @@ components:
 
     LoginResponse:
       type: object
-      description: JWT 登录/注册响应
+      description: JWT 登录/注册响应，含 Aspectus 通行证信息
       properties:
         access_token:
           type: string
@@ -111,6 +111,25 @@ components:
         token_type:
           type: string
           example: "Bearer"
+        account:
+          type: object
+          description: Aspectus 统一通行证信息
+          properties:
+            id:
+              type: string
+              description: 用户 ID
+            tenant_id:
+              type: string
+              description: 所属租户
+            email:
+              type: string
+              description: 邮箱
+            display_name:
+              type: string
+              description: 显示名称
+            created_at:
+              type: string
+              format: date-time
 
     ServiceAccount:
       type: object
@@ -282,6 +301,21 @@ components:
           type: string
         refresh_token:
           type: string
+        account:
+          type: object
+          description: 用户通行证信息（仅 user grant 返回）
+          properties:
+            id:
+              type: string
+            tenant_id:
+              type: string
+            email:
+              type: string
+            display_name:
+              type: string
+            created_at:
+              type: string
+              format: date-time
 
 paths:
   # ── System ──
@@ -795,7 +829,7 @@ paths:
                   default: "pandaria"
       responses:
         "200":
-          description: 登录成功
+          description: 登录成功，返回 JWT 和 Aspectus 通行证信息
           content:
             application/json:
               schema:
@@ -857,8 +891,41 @@ paths:
                 $ref: '#/components/schemas/LoginResponse'
         "403":
           description: 公开注册已禁用
+        "409":
+          description: 该邮箱已拥有 Aspectus 账户
+          content:
+            application/problem+json:
+              schema:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    example: "https://aspectus.dev/errors/account-exists"
+                  title:
+                    type: string
+                    example: "Account Already Exists"
+                  status:
+                    type: integer
+                    example: 409
+                  detail:
+                    type: string
+                    example: "该邮箱已拥有 Aspectus 账户。Aspectus 账号是 Pandaria 生态的统一通行证..."
+                  account:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      tenant_id:
+                        type: string
+                      email:
+                        type: string
+                      display_name:
+                        type: string
+                      hint:
+                        type: string
+                        enum: [login]
         "422":
-          description: 邮箱格式无效、密码过短、或邮箱已被注册
+          description: 邮箱格式无效或密码过短
 
   /logout:
     post:

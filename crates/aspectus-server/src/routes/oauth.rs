@@ -258,10 +258,30 @@ pub async fn issue_tokens(
         )
         .await;
 
+    // Look up user display info for the account field
+    let account_info: Option<(Option<String>, Option<String>, chrono::DateTime<Utc>)> = sqlx::query_as(
+        "SELECT email, display_name, created_at FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let (email, display_name, created_at) = account_info
+        .map(|(e, d, c)| (e, d, c))
+        .unwrap_or((None, None, Utc::now()));
+
     (StatusCode::OK, Json(json!({
         "access_token": access, "token_format": "jwt",
         "expires_in": ttl, "token_type": "Bearer",
-        "refresh_token": refresh
+        "refresh_token": refresh,
+        "account": {
+            "id": user_id,
+            "tenant_id": tenant_id,
+            "email": email,
+            "display_name": display_name,
+            "created_at": created_at
+        }
     }))).into_response()
 }
 
