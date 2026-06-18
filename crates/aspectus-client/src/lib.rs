@@ -270,7 +270,9 @@ struct JwkKey {
     n: String,
     #[serde(default)]
     e: String,
+    /// Key ID — reserved for future key rotation support.
     #[serde(default)]
+    #[allow(dead_code)]
     kid: Option<String>,
 }
 

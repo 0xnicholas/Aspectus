@@ -13,6 +13,8 @@ info:
 
     **自省端点** 使用 Service Token 认证调用方，subject token 通过 body 传递。
 
+    **Auth 端点** (`/login`, `/register`, `/logout`, `/forgot-password`, `/reset-password`) 无需认证。
+
     **OAuth2 端点** (`/authorize`, `/oauth/token`) 无需认证。
 
     ## Token 类型
@@ -39,7 +41,7 @@ info:
 
     `/introspect` 对无效 token 返回 `{"active": false}` (HTTP 200)，不返回错误。
 
-  version: "0.8.0"
+  version: "0.9.0"
   contact:
     name: Aspectus Team
 
@@ -54,6 +56,8 @@ tags:
     description: 租户管理
   - name: Service Accounts
     description: 服务账号管理
+  - name: Auth
+    description: 用户认证 (登录/注册/登出/密码重置)
   - name: Users
     description: 用户管理
   - name: Roles
@@ -88,6 +92,25 @@ components:
         created_at:
           type: string
           format: date-time
+
+    LoginResponse:
+      type: object
+      description: JWT 登录/注册响应
+      properties:
+        access_token:
+          type: string
+          description: JWT access token
+        refresh_token:
+          type: string
+        token_format:
+          type: string
+          enum: [jwt]
+        expires_in:
+          type: integer
+          description: Token TTL in seconds (default 900)
+        token_type:
+          type: string
+          example: "Bearer"
 
     ServiceAccount:
       type: object
@@ -745,6 +768,173 @@ paths:
       responses:
         "204":
           description: 吊销成功（幂等）
+
+  # ── Auth (v0.9.0) ──
+  /login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      description: email + password → JWT access_token + refresh_token（一步，OAuth2 之外）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                client_id:
+                  type: string
+                  description: 登录的项目 (default: "pandaria")
+                  default: "pandaria"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    description: JWT access token
+                  refresh_token:
+                    type: string
+                  token_format:
+                    type: string
+                    enum: [jwt]
+                  expires_in:
+                    type: integer
+                  token_type:
+                    type: string
+        "401":
+          description: 邮箱或密码错误（不区分哪个错）
+        "403":
+          description: 账号已被挂起
+
+  /register:
+    post:
+      tags: [Auth]
+      summary: 用户注册
+      description: |
+        创建新账号并自动登录返回 JWT。
+        需要环境变量 `ASPECTUS_REGISTRATION_ENABLED=true`。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                display_name:
+                  type: string
+                tenant_id:
+                  type: string
+                  description: 加入的租户 (default: "default")
+                  default: "default"
+                client_id:
+                  type: string
+                  default: "pandaria"
+      responses:
+        "200":
+          description: 注册成功，自动登录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        "403":
+          description: 公开注册已禁用
+        "422":
+          description: 邮箱格式无效、密码过短、或邮箱已被注册
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: 退出登录
+      description: 吊销 refresh_token，可选吊销 access_token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+                access_token:
+                  type: string
+                  description: 可选，同时吊销 JWT
+      responses:
+        "204":
+          description: 退出成功（幂等）
+
+  /forgot-password:
+    post:
+      tags: [Auth]
+      summary: 忘记密码
+      description: |
+        输入邮箱，生成密码重置 token（开发环境日志输出重置链接）。
+        无论邮箱是否存在，始终返回相同消息（防枚举）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: 如果该邮箱已注册，重置链接已发送
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /reset-password:
+    post:
+      tags: [Auth]
+      summary: 重置密码
+      description: 验证重置 token，更新密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token:
+                  type: string
+                  description: 从重置链接中获取的 token
+                new_password:
+                  type: string
+                  minLength: 8
+      responses:
+        "200":
+          description: 密码已重置
+        "422":
+          description: token 无效或已过期，或密码过短
 
   # ── OAuth2 ──
   /authorize:
