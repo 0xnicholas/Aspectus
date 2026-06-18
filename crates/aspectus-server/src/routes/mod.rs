@@ -1,4 +1,5 @@
 pub mod api_keys;
+pub mod auth;
 pub mod health;
 pub mod introspect;
 pub mod service_accounts;

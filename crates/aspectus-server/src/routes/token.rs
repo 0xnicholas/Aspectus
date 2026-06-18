@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+use aspectus_core::identity::IdentityType;
 use aspectus_core::project::Project;
 
 use crate::error::ProblemDetails;
@@ -48,7 +49,7 @@ pub async fn issue(
         "jwt" => {
             let ttl: u64 = std::env::var("JWT_TTL_SECONDS")
                 .ok().and_then(|s| s.parse().ok()).unwrap_or(900);
-            match state.jwt_signer.sign(&req.client_id, &tenant_id, project, &scopes, ttl) {
+            match state.jwt_signer.sign(&req.client_id, &tenant_id, project, &scopes, IdentityType::ServiceAccount, ttl) {
                 Ok(token) => (StatusCode::OK, Json(json!({
                     "access_token": token, "token_format": "jwt",
                     "expires_in": ttl, "token_type": "Bearer"

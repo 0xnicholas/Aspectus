@@ -1,7 +1,7 @@
 # Aspectus — Project Status
 
-> 日期：2026-06-01
-> 版本：v0.8.0
+> 日期：2026-06-17
+> 版本：v0.9.0
 
 ## Overview
 
@@ -12,7 +12,7 @@ Aspectus is the unified identity and multi-tenant management service for the Pan
 | Layer | Technology |
 |-------|-----------|
 | Backend | Rust + axum + tokio |
-| Database | PostgreSQL (13 tables, 10 migrations) |
+| Database | PostgreSQL (14 tables, 11 migrations) |
 | Cache | Redis (introspection, revocation, Service Token) |
 | Auth | argon2id (passwords), RS256 (JWT), SHA256 (API Keys) |
 | Frontend | React 19 + TypeScript + Vite |
@@ -41,63 +41,77 @@ Aspectus is the unified identity and multi-tenant management service for the Pan
 | OAuth2 Client Registration | ✅ | v0.7 |
 | Prometheus Metrics | ✅ | v0.8 |
 | OpenAPI Documentation | ✅ | v0.8 |
+| Login / Logout (simplified) | ✅ | v0.9 |
+| User Registration (public) | ✅ | v0.9 |
+| Password Reset Flow | ✅ | v0.9 |
+| Authentication Audit Logging | ✅ | v0.9 |
+| JWKS Real Public Key | ✅ | v0.9 |
+| JWT identity_type Claim | ✅ | v0.9 |
+| Local JWT Verification (client) | ✅ | v0.9 |
 | Admin Console (React SPA) | ✅ | v0.3-console |
 | Rust Client Library | ✅ | v0.8 |
 | Docker Support | ✅ | v0.8 |
 
-## API Endpoints (18)
+## API Endpoints (25)
 
 | # | Method | Path | Auth |
 |---|--------|------|:----:|
 | 1 | GET | `/health` | — |
 | 2 | GET | `/metrics` | — |
 | 3 | POST | `/introspect` | Service Token |
-| 4 | POST | `/tenants` | Service Token |
-| 5 | GET | `/tenants/{id}` | Service Token |
-| 6 | PUT | `/tenants/{id}/quotas` | Service Token |
-| 7 | POST | `/service-accounts` | Service Token |
-| 8 | GET | `/service-accounts` | Service Token |
-| 9 | GET | `/service-accounts/{id}` | Service Token |
-| 10 | POST | `/users` | Service Token |
-| 11 | GET | `/users` | Service Token |
-| 12 | GET | `/users/{id}` | Service Token |
-| 13 | PUT | `/users/{id}/suspend` | Service Token |
-| 14 | POST | `/api-keys` | Service Token |
-| 15 | GET | `/api-keys` | Service Token |
-| 16 | GET | `/api-keys/{id}` | Service Token |
-| 17 | DELETE | `/api-keys/{id}` | Service Token |
-| 18 | GET | `/roles` | Service Token |
-| 19 | POST | `/users/{id}/roles` | Service Token |
-| 20 | DELETE | `/users/{id}/roles/{role_id}` | Service Token |
-| 21 | POST | `/authorize` | — |
-| 22 | POST | `/oauth/token` | — |
-| 23 | POST | `/clients` | Service Token |
-| 24 | GET | `/clients` | Service Token |
-| 25 | GET | `/.well-known/jwks.json` | — |
+| 4 | POST | `/login` | — |
+| 5 | POST | `/register` | — |
+| 6 | POST | `/logout` | — |
+| 7 | POST | `/forgot-password` | — |
+| 8 | POST | `/reset-password` | — |
+| 9 | POST | `/tenants` | Service Token |
+| 10 | GET | `/tenants/{id}` | Service Token |
+| 11 | PUT | `/tenants/{id}/quotas` | Service Token |
+| 12 | POST | `/service-accounts` | Service Token |
+| 13 | GET | `/service-accounts` | Service Token |
+| 14 | GET | `/service-accounts/{id}` | Service Token |
+| 15 | POST | `/users` | Service Token |
+| 16 | GET | `/users` | Service Token |
+| 17 | GET | `/users/{id}` | Service Token |
+| 18 | PUT | `/users/{id}/suspend` | Service Token |
+| 19 | POST | `/api-keys` | Service Token |
+| 20 | GET | `/api-keys` | Service Token |
+| 21 | GET | `/api-keys/{id}` | Service Token |
+| 22 | DELETE | `/api-keys/{id}` | Service Token |
+| 23 | GET | `/roles` | Service Token |
+| 24 | POST | `/users/{id}/roles` | Service Token |
+| 25 | DELETE | `/users/{id}/roles/{role_id}` | Service Token |
+| 26 | POST | `/authorize` | — |
+| 27 | POST | `/oauth/token` | — |
+| 28 | POST | `/clients` | Service Token |
+| 29 | GET | `/clients` | Service Token |
+| 30 | GET | `/.well-known/jwks.json` | — |
 
 ## Test Coverage
 
 | Suite | Tests | Status |
 |-------|:-----:|:------:|
-| aspectus-auth (unit) | 9 | ✅ |
-| aspectus-client (unit) | 1 | ✅ |
+| aspectus-auth (unit) | 21 | ✅ |
+| aspectus-client (unit) | 4 | ✅ |
+| aspectus-core (unit) | 19 | ✅ |
+| aspectus-server (unit) | 29 | ✅ |
 | integration_test | 6 | ✅ |
 | feature_test (User/Role/OAuth2) | 6 | ✅ |
 | benchmark | 1 | ✅ |
-| **Total** | **23** | ✅ |
+| **Total** | **86** | ✅ |
 
 ## Database
 
 ```
-13 Tables: tenants, service_accounts, users, api_keys, roles,
+14 Tables: tenants, service_accounts, users, api_keys, roles,
            roles_scopes, users_roles, scopes, audit_logs,
            service_tokens, authorization_codes, refresh_tokens,
-           oauth2_clients
+           oauth2_clients, password_reset_tokens
 
 6 Enums:   identity_type, project, role_type,
            password_encryption_method
 
-10 Migrations: 001 through 010 (fully reproducible)
+11 Migrations: 001 through 011 (fully reproducible)
 ```
 
 ## Console (Admin UI)

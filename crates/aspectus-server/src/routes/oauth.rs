@@ -5,6 +5,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 
 use aspectus_auth::password::PasswordHasher;
+use aspectus_core::identity::IdentityType;
 use aspectus_core::store::{
     AuthorizationCodeStore, RefreshTokenStore, OAuth2ClientStore,
 };
@@ -226,7 +227,7 @@ pub async fn token(
     }
 }
 
-async fn issue_tokens(
+pub async fn issue_tokens(
     state: &AppState, user_id: &str, tenant_id: &str, client_id: &str,
 ) -> impl IntoResponse {
     let ttl: u64 = std::env::var("JWT_TTL_SECONDS").ok()
@@ -237,7 +238,7 @@ async fn issue_tokens(
     // Expand scope from user roles
     let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await;
 
-    let access = match state.jwt_signer.sign(user_id, tenant_id, project, &scopes, ttl) {
+    let access = match state.jwt_signer.sign(user_id, tenant_id, project, &scopes, IdentityType::User, ttl) {
         Ok(t) => t,
         Err(e) => return ProblemDetails::from(e).into_response(),
     };

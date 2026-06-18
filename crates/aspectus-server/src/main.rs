@@ -89,11 +89,16 @@ async fn main() -> anyhow::Result<()> {
 
     // Rate limiters (per-endpoint tuning)
     let authorize_limiter = RateLimiter::new(5, 60);     // 5/min per IP
+    let password_limiter = RateLimiter::new(3, 60);      // 3/min per IP (password ops)
     let token_limiter = RateLimiter::new(30, 60);        // 30/min per IP
     let introspect_limiter = RateLimiter::new(10000, 60); // 10000/min per service token
     let mgmt_limiter = RateLimiter::new(100, 60);         // 100/min per service token
 
     let authorize_rl = authorize_limiter.clone();
+    let login_rl = authorize_limiter.clone();
+    let register_rl = authorize_limiter.clone();
+    let password_rl = password_limiter.clone();
+    let password_rl2 = password_limiter.clone();
     let token_rl = token_limiter.clone();
     let introspect_rl = introspect_limiter.clone();
     let mgmt_rl = mgmt_limiter.clone();
@@ -137,6 +142,33 @@ async fn main() -> anyhow::Result<()> {
                 rate_limit::rate_limit_layer(authorize_rl.clone(), rate_limit::ip_key, req, next)
             }))
             .layer(DefaultBodyLimit::max(4096))
+        )
+        .route("/login", post(aspectus_server::routes::auth::login)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(login_rl.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(4096))
+        )
+        .route("/register", post(aspectus_server::routes::auth::register)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(register_rl.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(4096))
+        )
+        .route("/logout", post(aspectus_server::routes::auth::logout)
+            .layer(DefaultBodyLimit::max(2048))
+        )
+        .route("/forgot-password", post(aspectus_server::routes::auth::forgot_password)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(password_rl.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(2048))
+        )
+        .route("/reset-password", post(aspectus_server::routes::auth::reset_password)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(password_rl2.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(2048))
         )
         .route("/oauth/token", post(aspectus_server::routes::oauth::token)
             .route_layer(middleware::from_fn(move |req, next| {

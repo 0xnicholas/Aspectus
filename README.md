@@ -37,6 +37,11 @@ curl http://localhost:3100/health
 | `/health` | GET | 无 | 健康检查 |
 | `/metrics` | GET | 无 | Prometheus 指标 |
 | `/introspect` | POST | Service Token | Token 自省 (RFC 7662) |
+| `/login` | POST | 无 | 用户登录 (email+password → JWT) |
+| `/register` | POST | 无 | 用户注册 (需 `ASPECTUS_REGISTRATION_ENABLED=true`) |
+| `/logout` | POST | 无 | 吊销 refresh token |
+| `/forgot-password` | POST | 无 | 生成密码重置 token |
+| `/reset-password` | POST | 无 | 验证 token + 更新密码 |
 | `/tenants` | POST/GET | Service Token | 租户管理 |
 | `/tenants/{id}/quotas` | PUT | Service Token | 配额配置 |
 | `/service-accounts` | POST/GET | Service Token | 服务账号 |

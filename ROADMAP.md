@@ -1,13 +1,14 @@
 # Aspectus Roadmap
 
-> 最后更新：2026-06-01
-> 当前：**v0.8.0 完成 — 全栈就绪**
+> 最后更新：2026-06-17
+> 当前：**v0.9.0 完成 — 用户认证就绪**
 
 ```
-✅ 后端：Rust/axum | 18 API | 23 tests | 10 migrations | 13 tables
+✅ 后端：Rust/axum | 22 API | 73 tests | 11 migrations | 14 tables
 ✅ 前端：React/TypeScript | 8 pages | 6 components | Vite
 ✅ 文档：OpenAPI 3.0 | ADR×15 | Spec×7 | 对比×2
 ✅ 部署：Dockerfile | docker-compose | env config
+✅ JWT 本地验证 | JWKS 公钥 | 注册/登录/登出/密码重置
 ```
 
 ---
@@ -15,9 +16,9 @@
 ## 版本全景
 
 ```
-v0.1 ──→ v0.2 ──→ v0.3 ──→ v0.4 ──→ v0.5 ──→ v0.6 ──→ v0.7 ──→ v0.8
-骨架    MVP    多项目   JWT     User    OAuth2  Refresh  Metrics
-                +配额   Opaque   Role    Code    Token   +Docs
+v0.1 ──→ v0.2 ──→ v0.3 ──→ v0.4 ──→ v0.5 ──→ v0.6 ──→ v0.7 ──→ v0.8 ──→ v0.9
+骨架    MVP    多项目   JWT     User    OAuth2  Refresh  Metrics  用户认证
+                +配额   Opaque   Role    Code    Token   +Docs    就绪
 ```
 
 | 版本 | 状态 | 内容 |
@@ -30,6 +31,7 @@ v0.1 ──→ v0.2 ──→ v0.3 ──→ v0.4 ──→ v0.5 ──→ v0.6 
 | v0.6.0 | ✅ | OAuth2 Authorization Code |
 | v0.7.0 | ✅ | Refresh Token + OAuth2 Clients |
 | v0.8.0 | ✅ | Metrics + OpenAPI 文档 |
+| v0.9.0 | ✅ | 用户认证就绪: /login /register /logout /forgot-password /reset-password, JWKS 真实公钥, JWT 本地验证 (aspectus-client), identity_type in JWT, 审计日志 |
 | v1.0.0 | ⬜ | API 稳定承诺 |
 
 ---
@@ -41,6 +43,7 @@ v0.1.0 ──→ v0.2.0 ──→ v0.3.0 ──→ v1.0.0
   │            │            │            │
   │            │            │            └── 依赖 v0.3.0 的 /introspect 格式
   │            │            │               + 新增 users/roles/oauth2 表
+  │            │            │               + v0.9.0 用户认证端点
   │            │            │
   │            │            └── 依赖 v0.2.0 的 /introspect 端点和数据模型
   │            │               + 新增 quotas 列、scopes 数据行
