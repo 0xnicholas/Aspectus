@@ -229,34 +229,21 @@ pub async fn register(
     }
 
     // Check email uniqueness
-    let existing_user: Option<(String, String, Option<String>)> = sqlx::query_as(
-        "SELECT id, tenant_id, display_name FROM users WHERE email = $1",
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)",
     )
     .bind(&reg.email)
-    .fetch_optional(&state.pool)
+    .fetch_one(&state.pool)
     .await
-    .unwrap_or(None);
+    .unwrap_or(false);
 
-    if let Some((existing_id, existing_tenant, existing_name)) = existing_user {
-        // User already has an Aspectus account — tell them that explicitly
-        let body = serde_json::json!({
-            "type": "https://aspectus.dev/errors/account-exists",
-            "title": "Account Already Exists",
-            "status": 409,
-            "detail": "该邮箱已拥有 Aspectus 账户。Aspectus 账号是 Pandaria 生态的统一通行证，可用于登录 Pandaria、Tavern、Constell 等所有服务。请直接登录。",
-            "account": {
-                "id": existing_id,
-                "tenant_id": existing_tenant,
-                "email": reg.email,
-                "display_name": existing_name,
-                "hint": "login"
-            }
-        });
-        return (
-            axum::http::StatusCode::CONFLICT,
-            [("content-type", "application/problem+json")],
-            Json(body),
-        ).into_response();
+    if exists {
+        // Don't leak whether email exists — use same error as login
+        return ProblemDetails::validation_failed(
+            "Email is already registered",
+            vec![],
+        )
+        .into_response();
     }
 
     // Ensure tenant exists (or create default)
