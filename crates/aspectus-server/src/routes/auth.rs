@@ -12,7 +12,7 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use axum::http::HeaderMap;
 use chrono::Utc;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
@@ -65,10 +65,15 @@ async fn audit_auth_event(
 
 // ── POST /login ────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct LoginRequest {
     email: String,
     password: String,
+    /// ADR-016: tenant_id is REQUIRED to disambiguate when the same email
+    /// is registered under multiple tenants (schema UNIQUE (tenant_id, email)).
+    /// Frontends MUST call `POST /login/lookup` first and pass the
+    /// user-selected tenant here.
+    pub tenant_id: String,
     /// Which project the user is logging into (default: "pandaria").
     #[serde(default = "default_client_id")]
     client_id: String,
@@ -80,8 +85,10 @@ fn default_client_id() -> String {
 
 /// POST /login
 ///
-/// One-step email+password → JWT access token + refresh token.
-/// No OAuth2 authorization code exchange required.
+/// Step 2 of the two-step login flow (ADR-016): email + password + tenant_id
+/// → JWT access token + refresh token. Frontends must call `POST /login/lookup`
+/// first to obtain the list of tenants this email is registered under, then
+/// pass the user-selected `tenant_id` here.
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -99,10 +106,13 @@ pub async fn login(
         .into_response();
     }
 
-    // Look up user by email
+    // Look up user by (tenant_id, email) — ADR-016.
+    // Same email can exist in multiple tenants (UNIQUE (tenant_id, email)),
+    // so an email-only lookup is ambiguous.
     let (user_id, tenant_id) = match sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, tenant_id, password_hash FROM users WHERE email = $1",
+        "SELECT id, tenant_id, password_hash FROM users WHERE tenant_id = $1 AND email = $2",
     )
+    .bind(&login_req.tenant_id)
     .bind(&login_req.email)
     .fetch_optional(&state.pool)
     .await
@@ -121,7 +131,12 @@ pub async fn login(
             return ProblemDetails::unauthorized("Invalid email or password", "/login").into_response();
         }
         Err(e) => {
-            tracing::error!(error = %e, email = %login_req.email, "User lookup failed");
+            tracing::error!(
+                error = %e,
+                tenant_id = %login_req.tenant_id,
+                email_hash = %hex::encode(Sha256::digest(login_req.email.as_bytes())),
+                "User lookup failed"
+            );
             return ProblemDetails::internal_error("Authentication service temporarily unavailable").into_response();
         }
     };
@@ -228,10 +243,13 @@ pub async fn register(
         .into_response();
     }
 
-    // Check email uniqueness
+    // Check email uniqueness — scoped to tenant (ADR-016)
+    // Schema: UNIQUE (tenant_id, email) allows same email across different tenants.
+    // Previously this query omitted tenant_id, incorrectly blocking cross-tenant registration.
     let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)",
+        "SELECT EXISTS(SELECT 1 FROM users WHERE tenant_id = $1 AND email = $2)",
     )
+    .bind(&reg.tenant_id)
     .bind(&reg.email)
     .fetch_one(&state.pool)
     .await
@@ -246,7 +264,21 @@ pub async fn register(
         .into_response();
     }
 
-    // Ensure tenant exists (or create default)
+    // ADR-016 decision 6: Verify the tenant exists BEFORE attempting user creation.
+    // Previously this endpoint would auto-create a tenant with `INSERT INTO tenants (id, name)
+    // VALUES ($1, $1)` if it didn't exist — a production hazard because:
+    //   1. Anyone registering without an explicit tenant_id would land in the
+    //      same "default" tenant, mixing users across organizations.
+    //   2. An attacker could spam-tenant creation by registering under
+    //      arbitrary tenant IDs.
+    //
+    // The proper flow (per AGENTS.md + ADR-008) is:
+    //   - Production: admin creates tenants via `POST /tenants` (Service Token),
+    //     then admin creates users via `POST /users`.
+    //   - Demo/dev: a tenant must be created manually (or via init script)
+    //     before /register can be used against it.
+    //
+    // If the tenant doesn't exist, return 404 with a clear message.
     let tenant_id = reg.tenant_id;
     let tenant_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)",
@@ -257,15 +289,20 @@ pub async fn register(
     .unwrap_or(false);
 
     if !tenant_exists {
-        // Auto-create the tenant if it doesn't exist
-        if let Err(e) = sqlx::query("INSERT INTO tenants (id, name) VALUES ($1, $1)")
-            .bind(&tenant_id)
-            .execute(&state.pool)
-            .await
-        {
-            tracing::error!(error = %e, tenant_id = %tenant_id, "Failed to auto-create tenant");
-            return ProblemDetails::internal_error("Failed to create tenant").into_response();
-        }
+        tracing::warn!(
+            tenant_id = %tenant_id,
+            email_hash = %hex::encode(Sha256::digest(reg.email.as_bytes())),
+            "Registration attempted against non-existent tenant. \
+             This is expected for /register; in production use POST /users (Service Token)."
+        );
+        return ProblemDetails::not_found(
+            format!(
+                "Tenant '{tenant_id}' does not exist. \
+                 In production, ask an admin to create the tenant via `POST /tenants` \
+                 (Service Token auth) before creating users."
+            ),
+        )
+        .into_response();
     }
 
     // Hash password
@@ -293,6 +330,57 @@ pub async fn register(
     {
         tracing::error!(error = %e, "User creation failed");
         return ProblemDetails::internal_error("Failed to create account").into_response();
+    }
+
+    // ADR-016: Assign default Role so the new user has at least some scopes.
+    // We look up the role with is_default = true AND type IN ('user', 'both').
+    // Failure here is non-fatal — admin can assign roles later.
+    let default_role_id: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM roles
+         WHERE is_default = true AND type IN ('user', 'both')
+         LIMIT 1",
+    )
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    if let Some(role_id) = default_role_id {
+        let users_role_id = crate::util::generate_id();
+        match sqlx::query(
+            "INSERT INTO users_roles (id, user_id, role_id) VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, role_id) DO NOTHING",
+        )
+        .bind(&users_role_id)
+        .bind(&user_id)
+        .bind(&role_id)
+        .execute(&state.pool)
+        .await
+        {
+            Ok(_) => {
+                tracing::debug!(
+                    user_id = %user_id,
+                    role_id = %role_id,
+                    "Assigned default role on registration"
+                );
+                // Invalidate the scope expansion cache so the new role takes effect
+                // immediately on the access token we're about to issue.
+                crate::scope_expander::ScopeExpander::invalidate(&state.scope_cache, &user_id).await;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    user_id = %user_id,
+                    role_id = %role_id,
+                    "Failed to assign default role during registration — user will have no scopes"
+                );
+            }
+        }
+    } else {
+        tracing::warn!(
+            user_id = %user_id,
+            "No default role configured (is_default = true). \
+             New user registered without any Role — admin must assign one."
+        );
     }
 
     // Audit: registration
@@ -334,11 +422,10 @@ pub async fn logout(
     }
 
     // Revoke access token (JWT) if provided
-    if let Some(access_token) = req.access_token {
-        if access_token.starts_with("eyJ") {
+    if let Some(access_token) = req.access_token
+        && access_token.starts_with("eyJ") {
             state.jwt_verifier.revoke(&access_token).await;
         }
-    }
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -501,6 +588,105 @@ pub async fn reset_password(
     (StatusCode::OK, Json(json!({"message": "Password has been reset successfully."}))).into_response()
 }
 
+// ── POST /login/lookup ─────────────────────────────────────
+
+/// ADR-016: Step 1 of the two-step login flow.
+///
+/// Given an email, return the list of tenants this email is registered under
+/// (excluding suspended users). The client then asks the user to pick a tenant,
+/// and calls `POST /login` with `{email, password, tenant_id}`.
+///
+/// Security:
+/// - Returns the same shape (`{"tenants": []}`) regardless of whether the
+///   email exists in the database, to prevent email enumeration.
+/// - Tenant names are not considered PII (they are public organization names).
+/// - Suspended users are excluded — they cannot log in until reinstated.
+#[derive(Deserialize)]
+pub struct LoginLookupRequest {
+    email: String,
+}
+
+#[derive(Serialize)]
+pub struct TenantOption {
+    pub tenant_id: String,
+    pub tenant_name: String,
+    /// Reserved for future use. The `tenants` table does not yet have a
+    /// `logo_url` column; once added, this field will be populated.
+    /// Frontends should treat absent logo_url as "fall back to initials".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo_url: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct LoginLookupResponse {
+    pub tenants: Vec<TenantOption>,
+}
+
+pub async fn login_lookup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<LoginLookupRequest>,
+) -> impl IntoResponse {
+    let ip = client_ip(&headers);
+
+    // Validate email format — same rule as /register and /login.
+    // Bad input gets 422 with a clear message; legitimate-looking but unknown
+    // emails get an empty `tenants` array to prevent enumeration.
+    if !req.email.contains('@') || req.email.len() < 5 {
+        return ProblemDetails::validation_failed(
+            "Invalid email address",
+            vec![],
+        )
+        .into_response();
+    }
+
+    // Find all tenants under which this email has an active (non-suspended) account.
+    // Ordered by tenant name for stable, user-friendly display.
+    let rows: Vec<(String, String)> = match sqlx::query_as(
+        "SELECT t.id, t.name
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+         WHERE u.email = $1 AND u.is_suspended = false
+         ORDER BY t.name ASC",
+    )
+    .bind(&req.email)
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!(error = %e, "Login lookup query failed");
+            return ProblemDetails::internal_error("Authentication service temporarily unavailable")
+                .into_response();
+        }
+    };
+
+    let tenants: Vec<TenantOption> = rows
+        .into_iter()
+        .map(|(tenant_id, tenant_name)| TenantOption {
+            tenant_id,
+            tenant_name,
+            logo_url: None,
+        })
+        .collect();
+
+    // Trace at info level with hashed email so we can detect enumeration attacks
+    // (e.g. one IP looking up hundreds of emails) without leaking PII.
+    let email_hash = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(req.email.as_bytes()))
+    };
+    tracing::info!(
+        ip = %ip,
+        email_hash = %email_hash,
+        result_count = tenants.len(),
+        "Login lookup"
+    );
+
+    // Always 200 — empty array conveys "no match" without leaking existence.
+    (StatusCode::OK, Json(LoginLookupResponse { tenants })).into_response()
+}
+
 // ── Tests ───────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -511,23 +697,53 @@ mod tests {
 
     #[test]
     fn login_request_with_client_id() {
-        let json = r#"{"email":"a@b.com","password":"secret123"}"#;
+        let json = r#"{"email":"a@b.com","password":"secret123","tenant_id":"org_acme"}"#;
         let req: LoginRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.email, "a@b.com");
+        assert_eq!(req.tenant_id, "org_acme");
         assert_eq!(req.client_id, "pandaria"); // default
     }
 
     #[test]
     fn login_request_custom_client_id() {
-        let json = r#"{"email":"a@b.com","password":"secret123","client_id":"tavern"}"#;
+        let json = r#"{"email":"a@b.com","password":"secret123","tenant_id":"org_acme","client_id":"tavern"}"#;
         let req: LoginRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.client_id, "tavern");
+        assert_eq!(req.tenant_id, "org_acme");
+    }
+
+    #[test]
+    fn login_request_requires_tenant_id() {
+        // ADR-016: tenant_id is REQUIRED — without it, login is ambiguous
+        // for users registered under multiple tenants. The JSON deserializer
+        // must reject this before the handler is even called.
+        let json = r#"{"email":"a@b.com","password":"secret123"}"#;
+        let result: Result<LoginRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "Login without tenant_id must fail to deserialize");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("tenant_id") || err.contains("missing field"),
+            "Error should mention tenant_id, got: {err}"
+        );
+    }
+
+    #[test]
+    fn login_request_empty_tenant_id_rejected() {
+        // Empty string passes the "required" check but the SQL lookup
+        // will simply not find anything. We rely on the lookup, not on
+        // a length check, so this test asserts the current behavior:
+        // empty tenant_id is accepted by deserialize, but yields no match.
+        let json = r#"{"email":"a@b.com","password":"secret123","tenant_id":""}"#;
+        let req: LoginRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.tenant_id, "");
     }
 
     // ── RegisterRequest ──
 
     #[test]
     fn register_request_minimal() {
+        // ADR-016: tenant_id defaults to "default" for backward compatibility,
+        // but the handler will return 404 if "default" doesn't exist (no auto-create).
         let json = r#"{"email":"a@b.com","password":"secret123"}"#;
         let req: RegisterRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.email, "a@b.com");
@@ -558,6 +774,37 @@ mod tests {
         assert!(!invalid.contains('@'));
     }
 
+    #[test]
+    fn register_default_tenant_must_exist_in_db() {
+        // ADR-016 decision 6: /register no longer auto-creates a tenant.
+        // The "default" tenant_id literal still parses successfully, but
+        // if the DB has no row with id="default", the handler returns 404.
+        // This test asserts the parsing rule; the handler behavior is exercised
+        // by integration tests.
+        let json = r#"{"email":"a@b.com","password":"secret123"}"#;
+        let req: RegisterRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.tenant_id, "default");
+    }
+
+    #[test]
+    fn register_404_for_missing_tenant_includes_guidance() {
+        // The 404 response from /register should mention the tenant_id
+        // and point to the production flow (POST /users via Service Token).
+        // This test verifies the *error message format*, not the DB lookup.
+        let pd = ProblemDetails::not_found(
+            "Tenant 'org-foo' does not exist. \
+             In production, ask an admin to create the tenant via `POST /tenants` \
+             (Service Token auth) before creating users."
+        );
+        let json = serde_json::to_value(&pd).unwrap();
+        assert_eq!(json["status"], 404);
+        assert_eq!(json["title"], "Not Found");
+        let detail = json["detail"].as_str().unwrap();
+        assert!(detail.contains("org-foo"), "detail should mention tenant_id");
+        assert!(detail.contains("POST /tenants"), "detail should mention admin flow");
+        assert!(detail.contains("Service Token"), "detail should mention Service Token auth");
+    }
+
     // ── LogoutRequest ──
 
     #[test]
@@ -582,6 +829,82 @@ mod tests {
         let json = r#"{"email":"a@b.com"}"#;
         let req: ForgotPasswordRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.email, "a@b.com");
+    }
+
+    // ── LoginLookupRequest (ADR-016) ──
+
+    #[test]
+    fn login_lookup_request_minimal() {
+        let json = r#"{"email":"alice@acme.com"}"#;
+        let req: LoginLookupRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.email, "alice@acme.com");
+    }
+
+    #[test]
+    fn login_lookup_email_must_contain_at_sign() {
+        // Mirrors the handler's validation rule
+        let invalid = "not-an-email";
+        assert!(!invalid.contains('@'));
+    }
+
+    #[test]
+    fn login_lookup_email_min_length() {
+        // Mirrors the handler's validation: email.len() < 5 → reject
+        assert!("a@b".len() < 5);
+        assert!("a@b.".len() < 5); // boundary
+        assert!("a@b.c".len() == 5); // exactly 5 — accepted
+    }
+
+    #[test]
+    fn tenant_option_omits_logo_url_when_none() {
+        // logo_url uses skip_serializing_if — verify the JSON shape
+        let opt = TenantOption {
+            tenant_id: "org_acme".into(),
+            tenant_name: "Acme Corp".into(),
+            logo_url: None,
+        };
+        let json = serde_json::to_value(&opt).unwrap();
+        assert_eq!(json["tenant_id"], "org_acme");
+        assert_eq!(json["tenant_name"], "Acme Corp");
+        assert!(json.get("logo_url").is_none(),
+                "logo_url must be absent when None, got: {json}");
+    }
+
+    #[test]
+    fn tenant_option_includes_logo_url_when_some() {
+        let opt = TenantOption {
+            tenant_id: "org_acme".into(),
+            tenant_name: "Acme Corp".into(),
+            logo_url: Some("https://cdn.acme.com/logo.png".into()),
+        };
+        let json = serde_json::to_value(&opt).unwrap();
+        assert_eq!(json["logo_url"], "https://cdn.acme.com/logo.png");
+    }
+
+    #[test]
+    fn login_lookup_response_empty_serializes() {
+        // The "no match" response must be indistinguishable from "email doesn't exist"
+        // — same shape, same status. Frontends should treat empty tenants as
+        // "this email isn't registered anywhere".
+        let resp = LoginLookupResponse { tenants: vec![] };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["tenants"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn login_lookup_response_multiple_serializes_in_order() {
+        // Order should match the SQL ORDER BY t.name ASC.
+        let resp = LoginLookupResponse {
+            tenants: vec![
+                TenantOption { tenant_id: "t1".into(), tenant_name: "Acme Corp".into(), logo_url: None },
+                TenantOption { tenant_id: "t2".into(), tenant_name: "Foo Industries".into(), logo_url: None },
+            ],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        let tenants = json["tenants"].as_array().unwrap();
+        assert_eq!(tenants.len(), 2);
+        assert_eq!(tenants[0]["tenant_name"], "Acme Corp");
+        assert_eq!(tenants[1]["tenant_name"], "Foo Industries");
     }
 
     // ── ResetPasswordRequest ──

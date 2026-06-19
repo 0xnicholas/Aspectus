@@ -97,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
     let authorize_rl = authorize_limiter.clone();
     let login_rl = authorize_limiter.clone();
     let register_rl = authorize_limiter.clone();
+    let login_lookup_rl = authorize_limiter.clone();
     let password_rl = password_limiter.clone();
     let password_rl2 = password_limiter.clone();
     let token_rl = token_limiter.clone();
@@ -148,6 +149,12 @@ async fn main() -> anyhow::Result<()> {
                 rate_limit::rate_limit_layer(login_rl.clone(), rate_limit::ip_key, req, next)
             }))
             .layer(DefaultBodyLimit::max(4096))
+        )
+        .route("/login/lookup", post(aspectus_server::routes::auth::login_lookup)
+            .route_layer(middleware::from_fn(move |req, next| {
+                rate_limit::rate_limit_layer(login_lookup_rl.clone(), rate_limit::ip_key, req, next)
+            }))
+            .layer(DefaultBodyLimit::max(2048))
         )
         .route("/register", post(aspectus_server::routes::auth::register)
             .route_layer(middleware::from_fn(move |req, next| {

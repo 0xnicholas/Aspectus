@@ -238,7 +238,32 @@ pub async fn issue_tokens(
     // Expand scope from user roles
     let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await;
 
-    let access = match state.jwt_signer.sign(user_id, tenant_id, project, &scopes, IdentityType::User, ttl) {
+    // ADR-016: Look up tenant_name and user details to embed in JWT + response.
+    // These are best-effort — failures are logged but don't fail token issuance.
+    let tenant_name: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM tenants WHERE id = $1",
+    )
+    .bind(tenant_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let user_info: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT email, display_name FROM users WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.pool)
+    .await
+    .unwrap_or(None);
+
+    let (user_email, user_display_name) = user_info
+        .map(|(e, d)| (Some(e), d))
+        .unwrap_or((None, None));
+
+    let access = match state.jwt_signer.sign_with_tenant_name(
+        user_id, tenant_id, tenant_name.as_deref(),
+        project, &scopes, IdentityType::User, ttl,
+    ) {
         Ok(t) => t,
         Err(e) => return ProblemDetails::from(e).into_response(),
     };
@@ -258,11 +283,39 @@ pub async fn issue_tokens(
         )
         .await;
 
-    (StatusCode::OK, Json(json!({
-        "access_token": access, "token_format": "jwt",
-        "expires_in": ttl, "token_type": "Bearer",
-        "refresh_token": refresh
-    }))).into_response()
+    // ADR-016: Derive available_projects from the expanded scope string.
+    // Reuses the helper so the parsing logic is unit-tested.
+    let available_projects: Vec<String> =
+        crate::scope_expander::projects_from_scopes(&scopes);
+
+    // ADR-016: Enhanced response — user + tenant context so clients don't need
+    // extra API calls to display "Acme Corp's alice".
+    let mut response = json!({
+        "access_token": access,
+        "token_format": "jwt",
+        "expires_in": ttl,
+        "token_type": "Bearer",
+        "refresh_token": refresh,
+        "user": {
+            "id": user_id,
+            "email": user_email,
+            "display_name": user_display_name,
+        },
+        "tenant": {
+            "id": tenant_id,
+            "name": tenant_name,
+        },
+        "available_projects": available_projects,
+    });
+
+    // Backward compatibility: if tenant_name lookup failed, drop the field
+    // (matches JWT behavior — skip_serializing_if on Option::None).
+    if let Some(obj) = response.get_mut("tenant").and_then(|t| t.as_object_mut())
+        && obj.get("name").map(|v| v.is_null()).unwrap_or(false) {
+        obj.remove("name");
+    }
+
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 // ---- /clients (v0.7) ----
