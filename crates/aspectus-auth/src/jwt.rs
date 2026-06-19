@@ -27,6 +27,10 @@ pub struct JwtClaims {
     pub iat: usize,
     pub exp: usize,
     pub jti: String,
+    /// ADR-016: Human-readable tenant name captured at sign time.
+    /// Optional — older tokens / SA tokens without a tenant_name lookup will omit it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tenant_name: Option<String>,
 }
 
 /// Computed once from the private key at startup.
@@ -86,6 +90,16 @@ impl JwtSigner {
         &self, sub: &str, tenant_id: &str, project: Project,
         scopes: &str, identity_type: IdentityType, ttl_seconds: u64,
     ) -> Result<String, CoreError> {
+        self.sign_with_tenant_name(sub, tenant_id, None, project, scopes, identity_type, ttl_seconds)
+    }
+
+    /// ADR-016: Sign with an optional human-readable tenant name.
+    /// When `tenant_name` is provided, it is embedded in the JWT payload
+    /// so clients can display "Acme Corp" without an extra API call.
+    pub fn sign_with_tenant_name(
+        &self, sub: &str, tenant_id: &str, tenant_name: Option<&str>,
+        project: Project, scopes: &str, identity_type: IdentityType, ttl_seconds: u64,
+    ) -> Result<String, CoreError> {
         let now = Utc::now().timestamp() as usize;
         let it: &str = identity_type.into();
         let claims = JwtClaims {
@@ -95,6 +109,7 @@ impl JwtSigner {
             aud: project.to_string(), iss: "https://aspectus".into(),
             iat: now, exp: now + ttl_seconds as usize,
             jti: crate::generate_id(),
+            tenant_name: tenant_name.map(String::from),
         };
         encode(&Header::new(jsonwebtoken::Algorithm::RS256), &claims, &self.encoding_key)
             .map_err(|e| CoreError::Internal(format!("JWT: {e}")))
@@ -228,5 +243,70 @@ mod tests {
         validation.validate_aud = false;
         let data = decode::<JwtClaims>(&token, &decoding_key, &validation).expect("decode");
         assert_eq!(data.claims.identity_type, "service_account");
+    }
+
+    // ---- ADR-016: tenant_name claim tests ----
+
+    fn decode_token_for_test(signer: &JwtSigner, token: &str) -> JwtClaims {
+        let jwks = signer.jwks_json();
+        let key = &jwks["keys"][0];
+        let decoding_key = DecodingKey::from_rsa_components(
+            key["n"].as_str().unwrap(),
+            key["e"].as_str().unwrap(),
+        ).expect("decoding key");
+        let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
+        validation.validate_exp = false;
+        validation.validate_aud = false;
+        decode::<JwtClaims>(token, &decoding_key, &validation).expect("decode").claims
+    }
+
+    #[test]
+    fn jwt_with_tenant_name_includes_claim() {
+        let signer = JwtSigner::from_env().expect("JWT signer");
+        let token = signer.sign_with_tenant_name(
+            "user-1", "tenant_acme", Some("Acme Corp"),
+            Project::Pandaria,
+            "pandaria:session:read",
+            IdentityType::User, 900,
+        ).expect("sign");
+
+        let claims = decode_token_for_test(&signer, &token);
+        assert_eq!(claims.tenant_name.as_deref(), Some("Acme Corp"));
+        assert_eq!(claims.tenant_id, "tenant_acme");
+    }
+
+    #[test]
+    fn jwt_without_tenant_name_omits_claim() {
+        let signer = JwtSigner::from_env().expect("JWT signer");
+        let token = signer.sign(
+            "sa-1", "t1", Project::Tavern,
+            "tavern:workflow:run",
+            IdentityType::ServiceAccount, 3600,
+        ).expect("sign");
+
+        let claims = decode_token_for_test(&signer, &token);
+        assert_eq!(claims.tenant_name, None);
+        // Verify the JSON payload itself omits the key (skip_serializing_if works)
+        let payload_part = token.split('.').nth(1).expect("payload");
+        let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload_part).expect("base64");
+        let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).expect("json");
+        assert!(payload.get("tenant_name").is_none(),
+                "tenant_name should be absent when not provided, got: {}", payload);
+    }
+
+    #[test]
+    fn legacy_sign_method_still_works() {
+        // Backward compatibility: the old 6-arg sign() should keep working
+        let signer = JwtSigner::from_env().expect("JWT signer");
+        let token = signer.sign(
+            "user-legacy", "t1", Project::Pandaria,
+            "pandaria:session:read",
+            IdentityType::User, 900,
+        ).expect("sign");
+
+        let claims = decode_token_for_test(&signer, &token);
+        assert_eq!(claims.tenant_name, None);
+        assert_eq!(claims.sub, "user-legacy");
     }
 }
