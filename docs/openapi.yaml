@@ -95,7 +95,7 @@ components:
           example: "Acme Corp"
         quotas:
           type: object
-          example: { "pandaria": { "max_concurrent_sessions": 50 } }
+          example: {"pandaria": {"max_concurrent_sessions": 50}}
         created_at:
           type: string
           format: date-time
@@ -149,6 +149,12 @@ components:
               description: |
                 人类可读的租户名称。嵌入 JWT payload 的 `tenant_name` claim。
                 如果查询失败则为 null。
+            logo_url:
+              type: string
+              nullable: true
+              description: |
+                租户 logo URL（migration 012 后激活）。
+                NULL 时前端应回退到首字母头像。
         available_projects:
           type: array
           description: |
@@ -188,7 +194,9 @@ components:
         logo_url:
           type: string
           nullable: true
-          description: 租户 logo URL（预留字段，当前不会返回）
+          description: |
+            租户 logo URL（migration 012 后激活）。
+            NULL 时前端应回退到首字母头像。
 
     ServiceAccount:
       type: object

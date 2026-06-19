@@ -610,9 +610,8 @@ pub struct LoginLookupRequest {
 pub struct TenantOption {
     pub tenant_id: String,
     pub tenant_name: String,
-    /// Reserved for future use. The `tenants` table does not yet have a
-    /// `logo_url` column; once added, this field will be populated.
-    /// Frontends should treat absent logo_url as "fall back to initials".
+    /// Tenant logo URL (populated since migration 012).
+    /// Frontends should fall back to initials when absent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logo_url: Option<String>,
 }
@@ -642,8 +641,10 @@ pub async fn login_lookup(
 
     // Find all tenants under which this email has an active (non-suspended) account.
     // Ordered by tenant name for stable, user-friendly display.
-    let rows: Vec<(String, String)> = match sqlx::query_as(
-        "SELECT t.id, t.name
+    // logo_url may be NULL — tenants created before migration 012
+    // won't have one set.
+    let rows: Vec<(String, String, Option<String>)> = match sqlx::query_as(
+        "SELECT t.id, t.name, t.logo_url
          FROM users u
          JOIN tenants t ON t.id = u.tenant_id
          WHERE u.email = $1 AND u.is_suspended = false
@@ -663,10 +664,10 @@ pub async fn login_lookup(
 
     let tenants: Vec<TenantOption> = rows
         .into_iter()
-        .map(|(tenant_id, tenant_name)| TenantOption {
+        .map(|(tenant_id, tenant_name, logo_url)| TenantOption {
             tenant_id,
             tenant_name,
-            logo_url: None,
+            logo_url,
         })
         .collect();
 

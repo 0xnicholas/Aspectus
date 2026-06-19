@@ -238,15 +238,18 @@ pub async fn issue_tokens(
     // Expand scope from user roles
     let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await;
 
-    // ADR-016: Look up tenant_name and user details to embed in JWT + response.
+    // ADR-016: Look up tenant info to embed in JWT + response.
     // These are best-effort — failures are logged but don't fail token issuance.
-    let tenant_name: Option<String> = sqlx::query_scalar(
-        "SELECT name FROM tenants WHERE id = $1",
+    let tenant_row: Option<(String, Option<String>)> = sqlx::query_as(
+        "SELECT name, logo_url FROM tenants WHERE id = $1",
     )
     .bind(tenant_id)
     .fetch_optional(&state.pool)
     .await
     .unwrap_or(None);
+
+    let tenant_name = tenant_row.as_ref().map(|(n, _)| n.clone());
+    let tenant_logo_url = tenant_row.and_then(|(_, logo)| logo);
 
     let user_info: Option<(String, Option<String>)> = sqlx::query_as(
         "SELECT email, display_name FROM users WHERE id = $1",
@@ -304,15 +307,20 @@ pub async fn issue_tokens(
         "tenant": {
             "id": tenant_id,
             "name": tenant_name,
+            "logo_url": tenant_logo_url,
         },
         "available_projects": available_projects,
     });
 
     // Backward compatibility: if tenant_name lookup failed, drop the field
     // (matches JWT behavior — skip_serializing_if on Option::None).
-    if let Some(obj) = response.get_mut("tenant").and_then(|t| t.as_object_mut())
-        && obj.get("name").map(|v| v.is_null()).unwrap_or(false) {
-        obj.remove("name");
+    if let Some(obj) = response.get_mut("tenant").and_then(|t| t.as_object_mut()) {
+        if obj.get("name").map(|v| v.is_null()).unwrap_or(false) {
+            obj.remove("name");
+        }
+        if obj.get("logo_url").map(|v| v.is_null()).unwrap_or(false) {
+            obj.remove("logo_url");
+        }
     }
 
     (StatusCode::OK, Json(response)).into_response()
