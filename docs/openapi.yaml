@@ -13,7 +13,7 @@ info:
 
     **自省端点** 使用 Service Token 认证调用方，subject token 通过 body 传递。
 
-    **Auth 端点** (`/login`, `/register`, `/logout`, `/forgot-password`, `/reset-password`) 无需认证。
+    **Auth 端点** (`/login`、`/register`、`/logout` 等) 无需认证。
 
     **OAuth2 端点** (`/authorize`, `/oauth/token`) 无需认证。
 
@@ -75,6 +75,13 @@ components:
       type: http
       scheme: bearer
       description: Service Token（每个 Project 一个）
+  responses:
+    NotFound:
+      description: 资源不存在
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemDetails"
 
   schemas:
     Tenant:
@@ -88,14 +95,22 @@ components:
           example: "Acme Corp"
         quotas:
           type: object
-          example: {"pandaria": {"max_concurrent_sessions": 50}}
+          example: { "pandaria": { "max_concurrent_sessions": 50 } }
         created_at:
           type: string
           format: date-time
 
     LoginResponse:
       type: object
-      description: JWT 登录/注册响应
+      description: |
+        JWT 登录/注册响应 (ADR-016 增强)
+
+        新增字段：
+        - `user`: 当前用户上下文
+        - `tenant`: 当前租户上下文
+        - `available_projects`: 用户 Role 展开后可访问的生态项目列表
+
+        老客户端可忽略新增字段，向后兼容。
       properties:
         access_token:
           type: string
@@ -111,6 +126,69 @@ components:
         token_type:
           type: string
           example: "Bearer"
+        user:
+          type: object
+          description: 当前用户上下文（ADR-016）
+          properties:
+            id:
+              type: string
+            email:
+              type: string
+            display_name:
+              type: string
+              nullable: true
+        tenant:
+          type: object
+          description: 当前租户上下文（ADR-016）
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+              nullable: true
+              description: |
+                人类可读的租户名称。嵌入 JWT payload 的 `tenant_name` claim。
+                如果查询失败则为 null。
+        available_projects:
+          type: array
+          description: |
+            用户 Role 展开后的 scope 中 distinct 出的生态项目列表
+            （ADR-016 决策 2）。前端可用此显示"alice 可访问 Pandaria、Taver"等 UI。
+          items:
+            type: string
+            enum: [pandaria, tavern, constell, tokencamp, heirloom, emerald]
+
+    LoginLookupResponse:
+      type: object
+      description: |
+        两步登录第一步响应（ADR-016 决策 1）
+
+        - `tenants` 为空数组时代表该邮箱未在任何非挂起租户下注册
+        - 始终返回 HTTP 200，避免邮箱枚举
+      properties:
+        tenants:
+          type: array
+          items:
+            $ref: "#/components/schemas/TenantOption"
+
+    TenantOption:
+      type: object
+      description: |
+        /login/lookup 返回的租户选项。前端展示在"选择租户"页面。
+
+        `logo_url` 是预留字段——`tenants` 表当前未包含该列，
+        未来增加后会由 lookup 端点填充。前端应在不存在时降级为首字母。
+      properties:
+        tenant_id:
+          type: string
+          description: 租户 ID，可作为后续 /login 的 `tenant_id` 参数传入
+        tenant_name:
+          type: string
+          description: 租户名称，人类可读
+        logo_url:
+          type: string
+          nullable: true
+          description: 租户 logo URL（预留字段，当前不会返回）
 
     ServiceAccount:
       type: object
@@ -697,7 +775,13 @@ paths:
                   description: 向后兼容（v0.2-v0.4）
                 project:
                   type: string
-                  enum: [pandaria, tavern, emerald, constell, tokencamp, heirloom]
+                  enum:
+                    - pandaria
+                    - tavern
+                    - emerald
+                    - constell
+                    - tokencamp
+                    - heirloom
                 scopes:
                   type: array
                   items:
@@ -770,18 +854,67 @@ paths:
           description: 吊销成功（幂等）
 
   # ── Auth (v0.9.0) ──
-  /login:
+  /login/lookup:
     post:
       tags: [Auth]
-      summary: 用户登录
-      description: email + password → JWT access_token + refresh_token（一步，OAuth2 之外）
+      summary: 两步登录第一步 — 查询邮箱关联的租户
+      description: |
+        ADR-016 两步登录的第一步：仅传入邮箱，返回该邮箱在哪些
+        (非挂起) 租户下注册。客户端让用户选择租户后，再调用 `/login`
+        并传入 `tenant_id`。
+
+        **安全**：
+        - 无论邮箱是否存在，均返回 HTTP 200 + 空数组，避免邮箱枚举
+        - 托管 suspended 用户不出现在列表中
+        - 请求受到 rate limit（与 /login 共享限流配额）
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: 查询成功（无论邮箱是否存在均返回 200）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginLookupResponse"
+        "422":
+          description: email 格式不合法
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
+
+  /login:
+    post:
+      tags: [Auth]
+      summary: 用户登录（ADR-016 两步法第二步）
+      description: |
+        email + password + tenant_id → JWT access_token + refresh_token。
+
+        **必须先调用** `POST /login/lookup` 获取 tenant_id（ADR-016 两步登录）。
+
+        为什么需要 `tenant_id`：同一个邮箱可以在多个租户下注册
+        （schema UNIQUE (tenant_id, email)）。如果省略 `tenant_id`，
+        API 无法确定登录的是哪个身份。
+
+        响应为 401 时不区分"邮箱不存在"、"邮箱存在但 password 错"、
+        "邮箱存在但 tenant_id 错"——一律返回 `Invalid email or password`，
+        避免信息泄漏。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, tenant_id]
               properties:
                 email:
                   type: string
@@ -789,9 +922,14 @@ paths:
                 password:
                   type: string
                   minLength: 8
+                tenant_id:
+                  type: string
+                  description: |
+                    租户 ID。来自 `POST /login/lookup` 返回的
+                    `tenants[].tenant_id`。必填。
                 client_id:
                   type: string
-                  description: 登录的项目 (default: "pandaria")
+                  description: 登录的项目
                   default: "pandaria"
       responses:
         "200":
@@ -821,17 +959,22 @@ paths:
   /register:
     post:
       tags: [Auth]
-      summary: 用户注册
+      summary: 用户注册（ADR-016：demo/dev only）
       description: |
         创建新账号并自动登录返回 JWT。
-        需要环境变量 `ASPECTUS_REGISTRATION_ENABLED=true`。
+
+        **仅限 demo/dev 环境使用**（需 `ASPECTUS_REGISTRATION_ENABLED=true`）。
+        生产环境应由管理员调用 `POST /users`（Service Token 认证）创建用户。
+
+        **ADR-016 决策 6**：本端点不再自动创建 tenant。`tenant_id` 必须已存在；
+        否则返回 404。
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [email, password]
+              required: [email, password, tenant_id]
               properties:
                 email:
                   type: string
@@ -843,8 +986,11 @@ paths:
                   type: string
                 tenant_id:
                   type: string
-                  description: 加入的租户 (default: "default")
-                  default: "default"
+                  description: |
+                    加入的租户。**必须已存在**（ADR-016 决策 6）。
+                    默认值 `"default"` 仍可传，但仅当数据库中存在名为
+                    `default` 的 tenant 时会成功。
+                    生产环境不要依赖 default — 传明确租户 ID。
                 client_id:
                   type: string
                   default: "pandaria"
@@ -854,9 +1000,17 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                $ref: "#/components/schemas/LoginResponse"
         "403":
-          description: 公开注册已禁用
+          description: 公开注册已禁用（ASPECTUS_REGISTRATION_ENABLED != true）
+        "404":
+          description: |
+            tenant_id 不存在。ADR-016 决策 6：不再自动创建 tenant。
+            错误消息会指引使用 `POST /tenants`（Service Token 认证）。
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
         "422":
           description: 邮箱格式无效、密码过短、或邮箱已被注册
 
@@ -1084,12 +1238,3 @@ paths:
                     type: array
                     items:
                       type: object
-
-components:
-  responses:
-    NotFound:
-      description: 资源不存在
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/ProblemDetails"
