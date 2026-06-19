@@ -21,6 +21,7 @@ Aspectus 项目的架构决策记录。每条 ADR 记录一个重要的架构决
 | [013](./013-emerald-entity-id-mapping.md) | Emerald entity_id 使用 `tenant_id:user_id` 复合映射 | Accepted | — |
 | [014](./014-error-handling-rfc7807.md) | API 错误响应采用 RFC 7807 Problem Details | Accepted | — |
 | [015](./015-id-format-short-id.md) | 实体 ID 格式 — 短 ID (varchar/21) | Accepted | ✅ Logto 也使用 varchar(21) 短 ID |
+| [016](./016-unified-login-ux.md) | 跨租户登录路由与登录响应增强 | Proposed | ✅ 类似 Google/GitHub 的两步登录（邮箱 → 选租户 → 密码） |
 
 ## 设计参考源
 
