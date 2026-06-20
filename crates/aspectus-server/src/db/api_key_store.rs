@@ -1,12 +1,10 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use aspectus_core::{
     api_key::{ApiKey, ApiKeyListItem},
     error::CoreError,
-    project::Project,
-    store::ApiKeyStore,
+    store::{ApiKeyStore, InsertApiKeyParams},
 };
 
 pub struct PgApiKeyStore {
@@ -23,28 +21,21 @@ impl PgApiKeyStore {
 impl ApiKeyStore for PgApiKeyStore {
     async fn insert(
         &self,
-        id: &str,
-        tenant_id: &str,
-        service_account_id: &str,
-        project: Project,
-        key_hash: &str,
-        key_prefix: &str,
-        scopes: &[String],
-        expires_at: Option<DateTime<Utc>>,
+        params: InsertApiKeyParams,
     ) -> Result<ApiKey, CoreError> {
         sqlx::query_as::<_, ApiKey>(
             "INSERT INTO api_keys (id, tenant_id, service_account_id, project, \
              key_hash, key_prefix, scopes, expires_at) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
         )
-        .bind(id)
-        .bind(tenant_id)
-        .bind(service_account_id)
-        .bind(project)
-        .bind(key_hash)
-        .bind(key_prefix)
-        .bind(scopes)
-        .bind(expires_at)
+        .bind(&params.id)
+        .bind(&params.tenant_id)
+        .bind(&params.service_account_id)
+        .bind(params.project)
+        .bind(&params.key_hash)
+        .bind(&params.key_prefix)
+        .bind(&params.scopes)
+        .bind(params.expires_at)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| CoreError::Internal(e.to_string()))

@@ -65,19 +65,7 @@ fn compute_cache_ttl(expires_at: Option<chrono::DateTime<chrono::Utc>>) -> u64 {
 }
 
 pub(crate) fn generate_id() -> String {
-    let mut bytes = [0u8; 16];
-    match getrandom::getrandom(&mut bytes) {
-        Ok(()) => hex::encode(bytes)[..21].to_string(),
-        Err(e) => {
-            tracing::warn!(error = %e, "RNG failure in auth generate_id — using fallback");
-            use std::time::{SystemTime, UNIX_EPOCH};
-            let ts = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0);
-            format!("{ts:021}")
-        }
-    }
+    aspectus_core::generate_id()
 }
 
 // ---- ApiKeyCreator ----
@@ -105,10 +93,11 @@ impl ApiKeyCreator {
         let key = format!("pk_live_{}", hex::encode(raw));
         let key_hash = sha256_hex(&raw);
         let key_prefix = key[..17].to_string();
-        self.store.insert(
-            &id, tenant_id, service_account_id, project, &key_hash, &key_prefix,
-            &scopes, expires_at,
-        ).await?;
+        self.store.insert(aspectus_core::store::InsertApiKeyParams {
+            id: id.clone(), tenant_id: tenant_id.to_string(), service_account_id: service_account_id.to_string(),
+            project, key_hash, key_prefix: key_prefix.clone(),
+            scopes: scopes.clone(), expires_at,
+        }).await?;
         Ok(CreatedApiKey { id, key, key_prefix, project, scopes, expires_at })
     }
 
@@ -129,10 +118,11 @@ impl ApiKeyCreator {
         let key_prefix = key[..10].to_string();
         let expires_at = Some(Utc::now() + chrono::Duration::seconds(ttl_seconds as i64));
         let scopes_vec: Vec<String> = scopes.split_whitespace().map(String::from).collect();
-        self.store.insert(
-            &id, tenant_id, service_account_id, project, &key_hash, &key_prefix,
-            &scopes_vec, expires_at,
-        ).await?;
+        self.store.insert(aspectus_core::store::InsertApiKeyParams {
+            id: id.clone(), tenant_id: tenant_id.to_string(), service_account_id: service_account_id.to_string(),
+            project, key_hash, key_prefix: key_prefix.clone(),
+            scopes: scopes_vec.clone(), expires_at,
+        }).await?;
         Ok(CreatedApiKey { id, key, key_prefix, project, scopes: scopes_vec, expires_at })
     }
 }
@@ -300,7 +290,7 @@ mod tests {
     fn generate_id_is_not_empty() {
         let id = generate_id();
         assert!(!id.is_empty());
-        assert_eq!(id.len(), 21);
+        assert_eq!(id.len(), 27, "KSUID base62 is 27 characters");
     }
 
     #[test]

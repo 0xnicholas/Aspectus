@@ -72,15 +72,16 @@ fn problem_details_no_errors_when_not_provided() {
 // ---- generate_id ----
 
 #[test]
-fn generate_id_returns_21_chars() {
+fn generate_id_returns_27_chars() {
     let id = generate_id();
-    assert_eq!(id.len(), 21);
+    assert_eq!(id.len(), 27, "KSUID base62 is always 27 characters");
 }
 
 #[test]
-fn generate_id_is_hex_string() {
+fn generate_id_is_base62_string() {
     let id = generate_id();
-    assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+    // KSUID uses base62: [0-9A-Za-z]
+    assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
 }
 
 #[test]

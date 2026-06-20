@@ -66,6 +66,17 @@ pub struct JwtSigner {
 const TEST_PRIVATE: &str = include_str!("test_private.pem");
 const TEST_PUBLIC: &str = include_str!("test_public.pem");
 
+/// Request parameters for signing a JWT.
+pub struct JwtSignRequest {
+    pub sub: String,
+    pub tenant_id: String,
+    pub tenant_name: Option<String>,
+    pub project: Project,
+    pub scopes: String,
+    pub identity_type: IdentityType,
+    pub ttl_seconds: u64,
+}
+
 impl JwtSigner {
     pub fn from_env() -> anyhow::Result<Self> {
         let pem = std::env::var("JWT_PRIVATE_KEY_PEM")
@@ -90,26 +101,31 @@ impl JwtSigner {
         &self, sub: &str, tenant_id: &str, project: Project,
         scopes: &str, identity_type: IdentityType, ttl_seconds: u64,
     ) -> Result<String, CoreError> {
-        self.sign_with_tenant_name(sub, tenant_id, None, project, scopes, identity_type, ttl_seconds)
+        self.sign_with_tenant_name(JwtSignRequest {
+            sub: sub.to_string(),
+            tenant_id: tenant_id.to_string(),
+            tenant_name: None,
+            project,
+            scopes: scopes.to_string(),
+            identity_type,
+            ttl_seconds,
+        })
     }
 
     /// ADR-016: Sign with an optional human-readable tenant name.
     /// When `tenant_name` is provided, it is embedded in the JWT payload
     /// so clients can display "Acme Corp" without an extra API call.
-    pub fn sign_with_tenant_name(
-        &self, sub: &str, tenant_id: &str, tenant_name: Option<&str>,
-        project: Project, scopes: &str, identity_type: IdentityType, ttl_seconds: u64,
-    ) -> Result<String, CoreError> {
+    pub fn sign_with_tenant_name(&self, req: JwtSignRequest) -> Result<String, CoreError> {
         let now = Utc::now().timestamp() as usize;
-        let it: &str = identity_type.into();
+        let it: &str = req.identity_type.into();
         let claims = JwtClaims {
-            sub: sub.to_string(), tenant_id: tenant_id.to_string(),
-            scope: scopes.to_string(), client_id: project.to_string(),
+            sub: req.sub, tenant_id: req.tenant_id,
+            scope: req.scopes, client_id: req.project.to_string(),
             identity_type: it.to_string(),
-            aud: project.to_string(), iss: "https://aspectus".into(),
-            iat: now, exp: now + ttl_seconds as usize,
+            aud: req.project.to_string(), iss: "https://aspectus".into(),
+            iat: now, exp: now + req.ttl_seconds as usize,
             jti: crate::generate_id(),
-            tenant_name: tenant_name.map(String::from),
+            tenant_name: req.tenant_name,
         };
         encode(&Header::new(jsonwebtoken::Algorithm::RS256), &claims, &self.encoding_key)
             .map_err(|e| CoreError::Internal(format!("JWT: {e}")))
@@ -263,12 +279,11 @@ mod tests {
     #[test]
     fn jwt_with_tenant_name_includes_claim() {
         let signer = JwtSigner::from_env().expect("JWT signer");
-        let token = signer.sign_with_tenant_name(
-            "user-1", "tenant_acme", Some("Acme Corp"),
-            Project::Pandaria,
-            "pandaria:session:read",
-            IdentityType::User, 900,
-        ).expect("sign");
+        let token = signer.sign_with_tenant_name(JwtSignRequest {
+            sub: "user-1".into(), tenant_id: "tenant_acme".into(), tenant_name: Some("Acme Corp".into()),
+            project: Project::Pandaria, scopes: "pandaria:session:read".into(),
+            identity_type: IdentityType::User, ttl_seconds: 900,
+        }).expect("sign");
 
         let claims = decode_token_for_test(&signer, &token);
         assert_eq!(claims.tenant_name.as_deref(), Some("Acme Corp"));

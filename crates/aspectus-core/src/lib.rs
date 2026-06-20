@@ -16,6 +16,9 @@ pub mod service_account;
 pub mod store;
 pub mod tenant;
 pub mod user;
+pub mod util;
+
+pub use util::generate_id;
 
 #[cfg(test)]
 mod tests;

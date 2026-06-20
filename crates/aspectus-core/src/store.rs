@@ -37,19 +37,25 @@ pub trait ServiceAccountStore: Send + Sync {
 }
 
 /// Persistence layer for ApiKey operations.
+///
+/// Parameters for inserting a new API key.
+pub struct InsertApiKeyParams {
+    pub id: String,
+    pub tenant_id: String,
+    pub service_account_id: String,
+    pub project: Project,
+    pub key_hash: String,
+    pub key_prefix: String,
+    pub scopes: Vec<String>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 #[async_trait]
 pub trait ApiKeyStore: Send + Sync {
     /// Insert a new API key row. `key_hash` is already computed by the caller.
     async fn insert(
         &self,
-        id: &str,
-        tenant_id: &str,
-        service_account_id: &str,
-        project: Project,
-        key_hash: &str,
-        key_prefix: &str,
-        scopes: &[String],
-        expires_at: Option<chrono::DateTime<chrono::Utc>>,
+        params: InsertApiKeyParams,
     ) -> Result<ApiKey, crate::error::CoreError>;
 
     /// Look up by sha256 hash. Returns the full ApiKey row.

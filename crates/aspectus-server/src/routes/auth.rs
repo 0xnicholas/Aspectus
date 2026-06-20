@@ -35,27 +35,29 @@ fn client_ip(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
-/// Record an audit log entry for authentication events.
-async fn audit_auth_event(
-    state: &AppState,
-    tenant_id: &str,
-    actor_id: &str,
+/// Parameters for an authentication audit log entry.
+struct AuditAuthParams {
+    tenant_id: String,
+    actor_id: String,
     actor_type: IdentityType,
-    action: &str,
-    target_type: &str,
-    target_id: &str,
+    action: String,
+    target_type: String,
+    target_id: String,
     metadata: serde_json::Value,
-) {
+}
+
+/// Record an audit log entry for authentication events.
+async fn audit_auth_event(state: &AppState, params: AuditAuthParams) {
     let id = crate::util::generate_id();
     let entry = aspectus_core::audit_log::AuditLog {
         id,
-        tenant_id: tenant_id.to_string(),
-        actor_id: actor_id.to_string(),
-        actor_type,
-        action: action.to_string(),
-        target_type: target_type.to_string(),
-        target_id: target_id.to_string(),
-        metadata,
+        tenant_id: params.tenant_id,
+        actor_id: params.actor_id,
+        actor_type: params.actor_type,
+        action: params.action,
+        target_type: params.target_type,
+        target_id: params.target_id,
+        metadata: params.metadata,
         created_at: Utc::now(),
     };
     if let Err(e) = state.audit_log_store.append(entry).await {
@@ -152,9 +154,11 @@ pub async fn login(
 
     if is_suspended {
         audit_auth_event(
-            &state, &tenant_id, &user_id, IdentityType::User,
-            "user.login_blocked", "user", &user_id,
-            serde_json::json!({"reason": "account_suspended", "ip": ip}),
+            &state, AuditAuthParams {
+                tenant_id: tenant_id.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
+                action: "user.login_blocked".into(), target_type: "user".into(), target_id: user_id.clone(),
+                metadata: serde_json::json!({"reason": "account_suspended", "ip": ip}),
+            },
         ).await;
         return ProblemDetails::unauthorized("Account is suspended", "/login").into_response();
     }
@@ -167,9 +171,11 @@ pub async fn login(
 
     // Audit: successful login
     audit_auth_event(
-        &state, &tenant_id, &user_id, IdentityType::User,
-        "user.login", "user", &user_id,
-        serde_json::json!({"ip": ip, "client_id": client_id}),
+        &state, AuditAuthParams {
+            tenant_id: tenant_id.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
+            action: "user.login".into(), target_type: "user".into(), target_id: user_id.clone(),
+            metadata: serde_json::json!({"ip": ip, "client_id": client_id}),
+        },
     ).await;
 
     // Issue tokens
@@ -385,9 +391,11 @@ pub async fn register(
 
     // Audit: registration
     audit_auth_event(
-        &state, &tenant_id, &user_id, IdentityType::User,
-        "user.registered", "user", &user_id,
-        serde_json::json!({"ip": ip, "email": reg.email}),
+        &state, AuditAuthParams {
+            tenant_id: tenant_id.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
+            action: "user.registered".into(), target_type: "user".into(), target_id: user_id.clone(),
+            metadata: serde_json::json!({"ip": ip, "email": reg.email}),
+        },
     ).await;
 
     // Auto-login: issue tokens
@@ -579,9 +587,11 @@ pub async fn reset_password(
 
     if let Some(tid) = tenant_id {
         audit_auth_event(
-            &state, &tid, &user_id, IdentityType::User,
-            "user.password_reset", "user", &user_id,
-            serde_json::json!({"method": "email_reset_token"}),
+            &state, AuditAuthParams {
+                tenant_id: tid.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
+                action: "user.password_reset".into(), target_type: "user".into(), target_id: user_id.clone(),
+                metadata: serde_json::json!({"method": "email_reset_token"}),
+            },
         ).await;
     }
 

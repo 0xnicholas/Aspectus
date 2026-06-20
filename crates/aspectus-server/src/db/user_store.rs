@@ -22,7 +22,7 @@ impl UserStore for PgUserStore {
         password_hash: &str,
         display_name: Option<&str>,
     ) -> Result<User, CoreError> {
-        let id = generate_id();
+        let id = crate::util::generate_id();
         sqlx::query_as::<_, User>(
             "INSERT INTO users (id, tenant_id, email, password_hash, display_name) \
              VALUES ($1, $2, $3, $4, $5) RETURNING *",
@@ -64,10 +64,4 @@ impl UserStore for PgUserStore {
             .map_err(|e| CoreError::Internal(e.to_string()))?;
         Ok(result.rows_affected() > 0)
     }
-}
-
-fn generate_id() -> String {
-    let mut bytes = [0u8; 16];
-    getrandom::getrandom(&mut bytes).unwrap_or_default();
-    hex::encode(bytes)[..21].to_string()
 }

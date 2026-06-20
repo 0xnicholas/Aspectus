@@ -263,10 +263,15 @@ pub async fn issue_tokens(
         .map(|(e, d)| (Some(e), d))
         .unwrap_or((None, None));
 
-    let access = match state.jwt_signer.sign_with_tenant_name(
-        user_id, tenant_id, tenant_name.as_deref(),
-        project, &scopes, IdentityType::User, ttl,
-    ) {
+    let access = match state.jwt_signer.sign_with_tenant_name(aspectus_auth::jwt::JwtSignRequest {
+        sub: user_id.to_string(),
+        tenant_id: tenant_id.to_string(),
+        tenant_name: tenant_name.clone(),
+        project,
+        scopes: scopes.clone(),
+        identity_type: IdentityType::User,
+        ttl_seconds: ttl,
+    }) {
         Ok(t) => t,
         Err(e) => return ProblemDetails::from(e).into_response(),
     };
