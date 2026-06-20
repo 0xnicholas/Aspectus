@@ -24,7 +24,8 @@ pub async fn service_token_auth(
         .and_then(|v| v.strip_prefix("Bearer "));
 
     let Some(token) = auth_header else {
-        return ProblemDetails::unauthorized(
+        return ProblemDetails::with_code_instance(
+            aspectus_core::ErrorCode::InvalidServiceToken,
             "Missing Authorization header",
             request.uri().path(),
         )
@@ -47,7 +48,11 @@ pub async fn service_token_auth(
             next.run(request).await
         }
         None => {
-            ProblemDetails::unauthorized("Invalid Service Token", request.uri().path())
+            ProblemDetails::with_code_instance(
+                aspectus_core::ErrorCode::InvalidServiceToken,
+                "Invalid Service Token",
+                request.uri().path(),
+            )
                 .into_response()
         }
     }

@@ -124,13 +124,13 @@ pub async fn login(
                 Ok(true) => (id, tid),
                 _ => {
                     // Failed login — ambiguous message, no user/email leak
-                    return ProblemDetails::unauthorized("Invalid email or password", "/login").into_response();
+                    return ProblemDetails::with_code_instance(aspectus_core::ErrorCode::InvalidCredentials, "Invalid email or password", "/login").into_response();
                 }
             }
         }
         Ok(None) => {
             // No such user — same ambiguous message
-            return ProblemDetails::unauthorized("Invalid email or password", "/login").into_response();
+            return ProblemDetails::with_code_instance(aspectus_core::ErrorCode::InvalidCredentials, "Invalid email or password", "/login").into_response();
         }
         Err(e) => {
             tracing::error!(
@@ -233,7 +233,8 @@ pub async fn register(
 
     // Validate email format
     if !reg.email.contains('@') || reg.email.len() < 5 {
-        return ProblemDetails::validation_failed(
+        return ProblemDetails::with_code_errors(
+            aspectus_core::ErrorCode::InvalidEmailFormat,
             "Invalid email address",
             vec![],
         )
@@ -242,7 +243,8 @@ pub async fn register(
 
     // Validate password strength (min 8 chars)
     if reg.password.len() < 8 {
-        return ProblemDetails::validation_failed(
+        return ProblemDetails::with_code_errors(
+            aspectus_core::ErrorCode::PasswordTooShort,
             "Password must be at least 8 characters",
             vec![],
         )
@@ -263,7 +265,8 @@ pub async fn register(
 
     if exists {
         // Don't leak whether email exists — use same error as login
-        return ProblemDetails::validation_failed(
+        return ProblemDetails::with_code_errors(
+            aspectus_core::ErrorCode::EmailAlreadyExists,
             "Email is already registered",
             vec![],
         )
@@ -642,7 +645,8 @@ pub async fn login_lookup(
     // Bad input gets 422 with a clear message; legitimate-looking but unknown
     // emails get an empty `tenants` array to prevent enumeration.
     if !req.email.contains('@') || req.email.len() < 5 {
-        return ProblemDetails::validation_failed(
+        return ProblemDetails::with_code_errors(
+            aspectus_core::ErrorCode::InvalidEmailFormat,
             "Invalid email address",
             vec![],
         )

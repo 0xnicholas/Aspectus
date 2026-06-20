@@ -1,6 +1,6 @@
 //! Unit tests for aspectus-server (no DB/Redis required).
 
-use crate::error::ProblemDetails;
+use crate::error::{ProblemDetails, ValidationError};
 use crate::util::generate_id;
 
 // ---- ProblemDetails RFC 7807 format ----
@@ -12,7 +12,8 @@ fn problem_details_unauthorized_format() {
     assert_eq!(json["status"], 401);
     assert_eq!(json["title"], "Unauthorized");
     assert_eq!(json["detail"], "Invalid token");
-    assert!(json["type"].as_str().unwrap().contains("unauthorized"));
+    assert_eq!(json["code"], "invalid_credentials");
+    assert!(json["type"].as_str().unwrap().contains("invalid_credentials"));
     assert!(json["instance"].as_str().unwrap().contains("/introspect"));
 }
 
@@ -91,6 +92,46 @@ fn generate_id_is_unique() {
         ids.insert(generate_id());
     }
     assert_eq!(ids.len(), 1000, "1000 generated IDs must all be unique");
+}
+
+// ---- ProblemDetails with ErrorCode ----
+
+#[test]
+fn problem_details_with_code_includes_code_field() {
+    let pd = ProblemDetails::with_code(aspectus_core::ErrorCode::UserNotFound, "User abc not found");
+    let json = serde_json::to_value(&pd).unwrap();
+    assert_eq!(json["code"], "user_not_found");
+    assert_eq!(json["status"], 404);
+    assert_eq!(json["title"], "Not Found");
+    assert!(json["type"].as_str().unwrap().contains("user_not_found"));
+}
+
+#[test]
+fn problem_details_with_code_instance() {
+    let pd = ProblemDetails::with_code_instance(
+        aspectus_core::ErrorCode::InvalidServiceToken,
+        "Missing header",
+        "/api-keys",
+    );
+    let json = serde_json::to_value(&pd).unwrap();
+    assert_eq!(json["code"], "invalid_service_token");
+    assert_eq!(json["instance"], "/api-keys");
+    assert_eq!(json["status"], 401);
+}
+
+#[test]
+fn problem_details_with_code_errors() {
+    let pd = ProblemDetails::with_code_errors(
+        aspectus_core::ErrorCode::InvalidEmailFormat,
+        "Bad email",
+        vec![ValidationError { field: "email".into(), message: "no @".into() }],
+    );
+    let json = serde_json::to_value(&pd).unwrap();
+    assert_eq!(json["code"], "invalid_email_format");
+    assert_eq!(json["status"], 422);
+    let errs = json["errors"].as_array().unwrap();
+    assert_eq!(errs.len(), 1);
+    assert_eq!(errs[0]["field"], "email");
 }
 
 // ---- CoreError to ProblemDetails conversion ----
