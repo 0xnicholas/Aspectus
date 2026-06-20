@@ -307,6 +307,7 @@ Aspectus/
 3. **租户隔离不可违反**：任何查询/操作必须限定在调用者的 `tenant_id` 范围内。SQL 查询必须有 `WHERE tenant_id = $1`。
 4. **审计日志不可变**：`AuditLog` 表 append-only，无 UPDATE/DELETE。敏感的 token 操作（创建、吊销）必须记录。
 5. **密钥不得出现在日志中**：JWT signature、API Key 原文、用户密码——禁止出现在任何 tracing span、日志、错误消息中。
+6. **跨租户登录路由**：`/login` 必须按 `(tenant_id, email)` 复合查找用户（ADR-016 决策 1），不得仅按 email 查询（跨租户同邮箱会路由到错误身份）。`/login/lookup` 端点对未知邮箱必须返回空列表（非 4xx），避免邮箱枚举攻击。
 
 ---
 
