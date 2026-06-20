@@ -17,6 +17,7 @@ use aspectus_server::db::{
     PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore,
 };
 use aspectus_server::middleware::auth::service_token_auth;
+use aspectus_server::middleware::audit::audit_layer;
 use aspectus_server::middleware::rate_limit::{self, RateLimiter};
 use aspectus_server::AppState;
 
@@ -122,6 +123,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
         .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))
         .layer(auth_layer.clone())
+        .layer(middleware::from_fn(audit_layer(state.audit_log_store.clone())))
         .layer(middleware::from_fn(move |req, next| {
             rate_limit::rate_limit_layer(mgmt_rl.clone(), rate_limit::service_token_key, req, next)
         }))
