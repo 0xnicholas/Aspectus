@@ -1,7 +1,8 @@
 # ADR-016: 跨租户登录路由与登录响应增强
 
-> 状态：Proposed
+> 状态：Accepted
 > 日期：2026-06-19
+> 实施：2026-06-20 (commits dd9c458, 64e7d82, 9441bea, 8c6f4cc, 7dad027)
 > 来源：用户访谈（alice 跨项目注册场景）、v0.9.0 `/login` 与 `/register` 代码 review
 > 关联 ADR：[ADR-008](./008-single-layer-multi-tenancy.md)（单层多租户）、[ADR-005](./005-role-global-definition.md)（Role 全局定义）
 > 关联实现：`crates/aspectus-server/src/routes/auth.rs`、`crates/aspectus-server/src/routes/oauth.rs`
@@ -375,68 +376,46 @@ constraint users__email unique (email)
 
 ## Migration 计划
 
-### Phase 1：后端（无 breaking change）
+### Phase 1：后端 ✅ 已完成 (2026-06-20)
 
-```bash
-# 1. 修改 schema migration —— 加 tenant_name 来源
-#    tenants 表已有 name 字段，无 schema 改动
+| Commit | 内容 |
+|--------|------|
+| `dd9c458` | JWT `tenant_name` claim（决策 3） |
+| `64e7d82` | `projects_from_scopes` helper（决策 2 辅助） |
+| `9441bea` | `/login/lookup` + login 增强 + register 修复（决策 1, 2, 4, 5, 6） |
+| `8c6f4cc` | README + OpenAPI 文档更新 |
+| `7dad027` | `logo_url` 列 + `/login/lookup` 返回 logo（P2） |
 
-# 2. 修代码
-git checkout -b adr-016-login-ux
-# - 修 routes/auth.rs：login/lookup + register + login
-# - 修 routes/oauth.rs：issue_tokens 增加 user/tenant 信息
-# - 修 aspectus-auth/jwt.rs：sign_with_tenant_info
-# - 修 routes/auth.rs：删除 default tenant 自动创建
-# - 加 migration：roles 表 is_default=true
-
-# 3. 测试
-DATABASE_URL=... REDIS_URL=... cargo test --workspace
-
-# 4. 集成测试（testcontainers）
-cargo test -p aspectus-server --test integration_test -- login_lookup
-```
+测试：21 新增测试（JWT sign 3 + projects_from_scopes 7 + login/lookup 7 + login tenant_id 2 + register 404 2）
 
 ### Phase 2：前端（各项目自建）
 
-```markdown
-Pandaria:
-- src/pages/Login.tsx → 实现两步法
-- src/api/aspectus.ts → 新增 lookup()
-- 测试：`alice@acme.com` 在 ACME/Foo 双注册 → 登录时正确路由
-
-Tavern:
-- src/pages/Login.tsx → 复用 Pandaria 的 Aspectus client 实现
-- ...
-
-Constell / Tokencamp / Heirloom:
-- 同上
-```
+⬜ Pandaria / Tavern / Constell / Tokencamp / Heirloom — 各自实现两步法 login UI
 
 ### Phase 3：文档更新
 
-- `README.md`：更新 `/register` 描述，明确 demo-only
-- `AGENTS.md`：在"安全约束"加 1 条"跨租户登录路由"原则
-- `docs/openapi.yaml`：增加 `/login/lookup` 端点定义
-- `docs/specs/v1.0.0-user-oauth2.md`：补充 §3 登录响应格式
+✅ `README.md` — 更新 `/register` 描述，两步法登录说明，demo vs production
+✅ `docs/openapi.yaml` — `/login/lookup` 端点定义，LoginResponse 增强 schema
+⬜ `AGENTS.md` — 在"安全约束"加"跨租户登录路由"原则（待后续更新）
 
 ---
 
-## Open Questions
+## Open Questions (Resolved)
 
 1. **`is_default=true` 的 Role 选哪个？**
-   - 现有 seed migration 有 5 个 Role（`tenant-admin`、`agent-developer`、`agent-operator`、`ci-deployer`、`readonly`）
-   - 建议：新建 `member` Role（read 权限 + 基础 session:create），避免 `agent-developer` 权限过大
-   - **待 v1.0.0 spec 确认**
+   - **决议**：`agent-developer`（role_agent_dev），在 migration 20260531000010 中设置 `is_default=true`
+   - **理由**：`agent-developer` 覆盖 pandaria session/agent + tavern workflow/read + constell agent:publish，新用户注册后即可在主要生态项目中"看见东西"。权限范围适中——不含管理类 scope（如 session:manage、workflow:manage）
+   - **数据**：`migrations/20260531000010_v0.5.0_role_seed.sql:7`
 
 2. **`/login/lookup` 是否返回 display_name？**
-   - 若返回：用户体验好，但暴露 PII（邮箱对应的真实姓名）
-   - 若不返回：用户必须选完租户才能看到自己是谁
-   - **建议**：不返回，等第二步输密码登录后再返回
+   - **决议**：不返回。`TenantOption` 仅含 `tenant_id`、`tenant_name`、`logo_url`
+   - **理由**：避免在密码验证前暴露用户真实姓名（PII 保护）。`display_name` 在 `/login` 第二步验证密码后随完整响应返回
+   - **代码**：`crates/aspectus-server/src/routes/auth.rs:610-618`
 
 3. **两步法是否对所有项目强制？**
-   - 严格强制：破坏老客户端（如果有的话）
-   - 向后兼容：`tenant_id` 可选，缺省时退化为单步（按 email 查首条）
-   - **建议**：v1.0.0 之前兼容老 API，v1.0.0 之后强制
+   - **决议**：强制。`LoginRequest.tenant_id` 为必填字段（`String`，非 `Option<String>`）
+   - **理由**：v0.9.0 是 `/login` 端点的第一个公开版本，不存在"老客户端"兼容负担。强制两步法从第一天起消除跨租户路由歧义
+   - **代码**：`crates/aspectus-server/src/routes/auth.rs:76` (`pub tenant_id: String`)
 
 ---
 

@@ -95,7 +95,7 @@ components:
           example: "Acme Corp"
         quotas:
           type: object
-          example: {"pandaria": {"max_concurrent_sessions": 50}}
+          example: { "pandaria": { "max_concurrent_sessions": 50 } }
         created_at:
           type: string
           format: date-time

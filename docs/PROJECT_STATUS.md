@@ -1,6 +1,6 @@
 # Aspectus — Project Status
 
-> 日期：2026-06-17
+> 日期：2026-06-20
 > 版本：v0.9.0
 
 ## Overview
@@ -12,7 +12,7 @@ Aspectus is the unified identity and multi-tenant management service for the Pan
 | Layer | Technology |
 |-------|-----------|
 | Backend | Rust + axum + tokio |
-| Database | PostgreSQL (14 tables, 11 migrations) |
+| Database | PostgreSQL (14 tables, 12 migrations) |
 | Cache | Redis (introspection, revocation, Service Token) |
 | Auth | argon2id (passwords), RS256 (JWT), SHA256 (API Keys) |
 | Frontend | React 19 + TypeScript + Vite |
@@ -48,6 +48,12 @@ Aspectus is the unified identity and multi-tenant management service for the Pan
 | JWKS Real Public Key | ✅ | v0.9 |
 | JWT identity_type Claim | ✅ | v0.9 |
 | Local JWT Verification (client) | ✅ | v0.9 |
+| Two-Step Login Flow (ADR-016) | ✅ | v0.9 |
+| Cross-Tenant Login Routing | ✅ | v0.9 |
+| Enriched Login Response (user/tenant/projects) | ✅ | v0.9 |
+| JWT tenant_name Claim | ✅ | v0.9 |
+| Tenant logo_url Support | ✅ | v0.9 |
+| Default Role on Registration | ✅ | v0.9 |
 | Admin Console (React SPA) | ✅ | v0.3-console |
 | Rust Client Library | ✅ | v0.8 |
 | Docker Support | ✅ | v0.8 |
@@ -86,6 +92,7 @@ Aspectus is the unified identity and multi-tenant management service for the Pan
 | 28 | POST | `/clients` | Service Token |
 | 29 | GET | `/clients` | Service Token |
 | 30 | GET | `/.well-known/jwks.json` | — |
+| 31 | POST | `/login/lookup` | — |
 
 ## Test Coverage
 
@@ -134,7 +141,7 @@ Build:      248KB JS (78KB gzipped)
 | [ROADMAP.md](../ROADMAP.md) | Version history + future |
 | [AGENTS.md](../AGENTS.md) | Architecture principles + ADR |
 | [docs/openapi.yaml](openapi.yaml) | API specification (OpenAPI 3.0) |
-| [docs/adr/](adr/) | 15 Architecture Decision Records |
+| [docs/adr/](adr/) | 16 Architecture Decision Records |
 | [docs/specs/](specs/) | 7 Technical specifications |
 | [docs/comparison-with-logto.md](comparison-with-logto.md) | Logto comparison |
 | [docs/console-comparison.md](console-comparison.md) | Console comparison |
@@ -157,3 +164,4 @@ Build:      248KB JS (78KB gzipped)
 | P2 | Emerald entity_id migration |
 | P3 | v1.0 API stability freeze |
 | P3 | Production load testing |
+| ✅ | ADR-016 two-step login UX (completed 2026-06-20) |
