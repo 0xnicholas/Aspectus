@@ -1,0 +1,14 @@
+---
+source: crates/aspectus-server/tests/http_tests/contract_test.rs
+assertion_line: 331
+expression: "body[\"quotas\"]"
+---
+{
+  "pandaria": {
+    "max_concurrent_sessions": 50,
+    "max_tokens_per_day": 1000000
+  },
+  "tokencamp": {
+    "monthly_tokens": 10000000
+  }
+}

@@ -134,7 +134,7 @@ async fn set_tenant_quotas(app: &axum::Router, tenant_id: &str, quotas: Value) {
         .body(Body::from(quotas.to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "set_tenant_quotas failed");
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "set_tenant_quotas failed");
 }
 
 async fn post_introspect(app: &axum::Router, token: &str) -> (StatusCode, Value, String) {
