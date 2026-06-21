@@ -140,6 +140,15 @@ pub struct JwtVerifier {
     cache: RedisCache,
 }
 
+impl Clone for JwtVerifier {
+    fn clone(&self) -> Self {
+        Self {
+            decoding_key: self.decoding_key.clone(),
+            cache: self.cache.clone(),
+        }
+    }
+}
+
 impl JwtVerifier {
     pub fn from_env(cache: RedisCache) -> anyhow::Result<Self> {
         let pem = std::env::var("JWT_PUBLIC_KEY_PEM")
@@ -157,6 +166,10 @@ impl JwtVerifier {
     pub async fn verify(&self, token: &str) -> IntrospectResponse {
         let mut v = Validation::new(jsonwebtoken::Algorithm::RS256);
         v.validate_exp = true;
+        // Relax audience validation — the JWT audience is the project name
+        // (e.g. "pandaria") and the verifier doesn't necessarily know which
+        // audience to expect (multi-project / federated scenarios).
+        v.validate_aud = false;
         let claims = match decode::<JwtClaims>(token, &self.decoding_key, &v) {
             Ok(d) => d.claims, Err(_) => return IntrospectResponse::inactive(),
         };

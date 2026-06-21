@@ -118,6 +118,7 @@ dependencies = [
  "hex",
  "hyper",
  "insta",
+ "jsonwebtoken",
  "ksuid",
  "mime",
  "redis",

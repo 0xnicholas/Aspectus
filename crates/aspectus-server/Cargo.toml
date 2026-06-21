@@ -35,3 +35,4 @@ tokio.workspace = true
 
 hex = "0.4"
 insta = { version = "1", features = ["json"] }
+jsonwebtoken = "9"

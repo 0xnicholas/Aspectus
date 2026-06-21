@@ -420,3 +420,177 @@ async fn introspect_inactive_omits_identity_fields() {
         );
     }
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// Contract Test 6: JWT (active) — token_format: "jwt"
+// ────────────────────────────────────────────────────────────────────────
+//
+// Same contract as API Key (Test 1), but for a JWT signed with the
+// project's private key. The shape is pinned so consumers (Pandaria,
+// Tavern) parsing /introspect for JWT tokens don't break.
+
+#[tokio::test]
+async fn introspect_active_jwt_contract() {
+    use aspectus_auth::jwt::JwtSigner;
+    use aspectus_core::identity::IdentityType;
+    use aspectus_core::project::Project;
+
+    let app = common::build_app_with().await.unwrap();
+    let tenant_id = create_tenant(&app.router, "contract-jwt").await;
+    let sa_id = create_service_account(&app.router, &tenant_id, "jwt-sa").await;
+
+    // Sign a JWT mimicking what /oauth/token would produce.
+    let jwt = app.jwt_signer.sign_with_tenant_name(
+        aspectus_auth::jwt::JwtSignRequest {
+            sub: sa_id.clone(),
+            tenant_id: tenant_id.clone(),
+            tenant_name: None,
+            project: Project::Pandaria,
+            scopes: "pandaria:session:create pandaria:session:read".to_string(),
+            identity_type: IdentityType::ServiceAccount,
+            ttl_seconds: 900,
+        }
+    ).expect("sign JWT");
+
+    let (status, body, content_type) = post_introspect(&app.router, &jwt).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(content_type.starts_with("application/json"));
+
+    // Header contract — JWT-specific markers
+    assert_eq!(body["active"], true);
+    assert_eq!(body["identity_type"], "service_account");
+    assert_eq!(body["client_id"], "pandaria");
+    assert_eq!(body["token_type"], "Bearer");
+    assert_eq!(body["token_format"], "jwt", "JWT tokens must report token_format=\"jwt\"");
+    assert!(body["exp"].is_i64(), "JWT must include exp (expiry as Unix seconds)");
+    assert_eq!(body["scope"], "pandaria:session:create pandaria:session:read");
+    // tenant_id and user_id are checked separately as they vary per run
+    assert!(body["tenant_id"].is_string());
+    assert!(body["user_id"].is_string());
+
+    // Pin the shape. tenant_id / user_id / exp are volatile; redact for stability.
+    let stable = json!({
+        "active": body["active"],
+        "tenant_id": "<JWT-tenant>",
+        "user_id": "<KSUID>",
+        "identity_type": body["identity_type"],
+        "client_id": body["client_id"],
+        "scope": body["scope"],
+        "token_type": body["token_type"],
+        "token_format": body["token_format"],
+        "exp_is_int": body["exp"].is_i64(),
+    });
+    insta::assert_json_snapshot!("introspect_active_jwt", stable);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Contract Test 7: Opaque token (active) — token_format: "opaque"
+// ────────────────────────────────────────────────────────────────────────
+//
+// Same contract as API Key (Test 1), but for an `ot_*` token created
+// via ApiKeyCreator::create_opaque. Tests the Opaque token path
+// independently of the OAuth2 flow.
+
+#[tokio::test]
+async fn introspect_active_opaque_contract() {
+    use aspectus_core::project::Project;
+
+    let app = common::build_app_with().await.unwrap();
+    let tenant_id = create_tenant(&app.router, "contract-opaque").await;
+    let sa_id = create_service_account(&app.router, &tenant_id, "opaque-sa").await;
+
+    // Mint an Opaque token (ot_* prefix) directly via the creator.
+    let created = app.api_key_creator.create_opaque(
+        &tenant_id,
+        &sa_id,
+        Project::Pandaria,
+        "pandaria:session:create pandaria:session:read",
+        3600, // 1h TTL
+    ).await.expect("create_opaque");
+    assert!(created.key.starts_with("ot_"), "Opaque token must have ot_ prefix");
+
+    let (status, body, content_type) = post_introspect(&app.router, &created.key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(content_type.starts_with("application/json"));
+
+    assert_eq!(body["active"], true);
+    assert_eq!(body["identity_type"], "service_account");
+    assert_eq!(body["client_id"], "pandaria");
+    assert_eq!(body["token_type"], "Bearer");
+    assert_eq!(body["token_format"], "opaque", "Opaque tokens must report token_format=\"opaque\"");
+    assert!(body["exp"].is_i64(), "Opaque tokens with TTL must include exp");
+    assert_eq!(body["scope"], "pandaria:session:create pandaria:session:read");
+    assert!(body["tenant_id"].is_string());
+    assert!(body["user_id"].is_string());
+
+    let stable = json!({
+        "active": body["active"],
+        "tenant_id": "<OPAQ-tenant>",
+        "user_id": "<KSUID>",
+        "identity_type": body["identity_type"],
+        "client_id": body["client_id"],
+        "scope": body["scope"],
+        "token_type": body["token_type"],
+        "token_format": body["token_format"],
+        "exp_is_int": body["exp"].is_i64(),
+    });
+    insta::assert_json_snapshot!("introspect_active_opaque", stable);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Contract Test 8: Expired JWT — must return {active: false}
+// ────────────────────────────────────────────────────────────────────────
+//
+// Expired tokens must be treated as inactive, not 4xx (RFC 7662).
+// This is the most common JWT failure mode.
+
+#[tokio::test]
+async fn introspect_expired_jwt_contract() {
+    use aspectus_core::identity::IdentityType;
+    use aspectus_core::project::Project;
+    use jsonwebtoken::{encode, EncodingKey, Header};
+    use sha2::Digest as _;
+    use sha2::Sha256;
+
+    let app = common::build_app_with().await.unwrap();
+    let tenant_id = create_tenant(&app.router, "contract-jwt-expired").await;
+    let sa_id = create_service_account(&app.router, &tenant_id, "expired-sa").await;
+
+    // Manually craft a JWT with exp in the past so it's actually expired.
+    // (JwtSigner::sign always sets iat=now which combined with the default
+    // 60s leeway would still be accepted even with ttl=0.)
+    let now = chrono::Utc::now().timestamp();
+    let claims = aspectus_auth::jwt::JwtClaims {
+        sub: sa_id,
+        tenant_id: tenant_id.clone(),
+        tenant_name: None,
+        scope: "pandaria:session:create".to_string(),
+        client_id: Project::Pandaria.to_string(),
+        identity_type: "service_account".to_string(),
+        aud: Project::Pandaria.to_string(),
+        iss: "https://aspectus".to_string(),
+        iat: (now - 7200) as usize, // 2h ago
+        exp: (now - 3600) as usize, // expired 1h ago (well past the 60s leeway)
+        jti: format!("expired-{}", hex::encode(Sha256::digest(tenant_id.as_bytes()))),
+    };
+    let pem_bytes = std::fs::read(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("aspectus-auth")
+            .join("src")
+            .join("test_private.pem"),
+    ).expect("read test private key");
+    let jwt = encode(
+        &Header::new(jsonwebtoken::Algorithm::RS256),
+        &claims,
+        &EncodingKey::from_rsa_pem(&pem_bytes).expect("encoding key"),
+    ).expect("sign expired JWT");
+
+    let (status, body, content_type) = post_introspect(&app.router, &jwt).await;
+    assert_eq!(status, StatusCode::OK, "RFC 7662: expired = 200, not 401");
+    assert!(content_type.starts_with("application/json"));
+    assert_eq!(body, json!({"active": false}));
+
+    insta::assert_json_snapshot!("introspect_expired_jwt", body);
+}
+

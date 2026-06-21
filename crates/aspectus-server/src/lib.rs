@@ -16,7 +16,7 @@ mod tests;
 
 use std::sync::Arc;
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, RedisCache};
+use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, RedisCache, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
 use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore, PgUserStore,
     PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore};
@@ -30,6 +30,7 @@ pub struct AppState {
     pub audit_log_store: Arc<PgAuditLogStore>,
     pub api_key_creator: Arc<ApiKeyCreator>,
     pub api_key_verifier: Arc<ApiKeyVerifier>,
+    pub token_verifier: Arc<TokenVerifier>,
     pub svc_token_verifier: Arc<ServiceTokenVerifier>,
     pub jwt_signer: Arc<JwtSigner>,
     pub jwt_verifier: Arc<JwtVerifier>,

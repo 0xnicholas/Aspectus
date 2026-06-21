@@ -1,5 +1,7 @@
 //! Unified token verification — dispatches to the correct verifier by prefix.
 
+use std::sync::Arc;
+
 use aspectus_core::introspect::IntrospectResponse;
 
 use crate::jwt::JwtVerifier;
@@ -12,12 +14,12 @@ use super::ApiKeyVerifier;
 /// - `eyJ*`      → JWT (JwtVerifier)
 /// - `ot_*`      → Opaque (reuses ApiKeyVerifier path via extract_raw)
 pub struct TokenVerifier {
-    api_key: ApiKeyVerifier,
-    jwt: JwtVerifier,
+    api_key: Arc<ApiKeyVerifier>,
+    jwt: Arc<JwtVerifier>,
 }
 
 impl TokenVerifier {
-    pub fn new(api_key: ApiKeyVerifier, jwt: JwtVerifier) -> Self {
+    pub fn new(api_key: Arc<ApiKeyVerifier>, jwt: Arc<JwtVerifier>) -> Self {
         Self { api_key, jwt }
     }
 

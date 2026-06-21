@@ -9,7 +9,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier};
+use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
 use aspectus_server::config::Config;
 use aspectus_server::db;
@@ -73,7 +73,8 @@ async fn main() -> anyhow::Result<()> {
         oauth_client_store: Arc::new(PgOAuth2ClientStore::new(pool.clone())),
         scope_cache: scope_cache.clone(),
         api_key_creator,
-        api_key_verifier,
+        api_key_verifier: api_key_verifier.clone(),
+        token_verifier: Arc::new(TokenVerifier::new(api_key_verifier, jwt_verifier.clone())),
         svc_token_verifier: svc_token_verifier.clone(),
         jwt_signer,
         jwt_verifier,

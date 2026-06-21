@@ -19,7 +19,7 @@ pub async fn handle(
     State(state): State<AppState>,
     Form(form): Form<IntrospectForm>,
 ) -> impl IntoResponse {
-    let mut response = state.api_key_verifier.verify(&form.token).await;
+    let mut response = state.token_verifier.verify(&form.token).await;
 
     // v0.8: Record metrics
     crate::routes::metrics::record_introspect(response.active);

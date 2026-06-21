@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier};
+use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
 use aspectus_server::db::{
     PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
@@ -25,7 +25,21 @@ use aspectus_server::AppState;
 
 const SERVICE_TOKEN: &str = "aspectus-dev-pandaria-service-token";
 
-pub async fn build_app() -> anyhow::Result<(Router, String)> {
+pub async fn build_app() -> anyhow::Result<(Router, String)> { build_app_with().await.map(|t| (t.router, t.token_hash)) }
+
+/// Bundle returned by [`build_app_with`] — gives tests access to the
+/// router plus the underlying JwtSigner / ApiKeyCreator so they can
+/// mint JWTs and Opaque tokens without going through the HTTP layer.
+pub struct TestApp {
+    pub router: Router,
+    pub token_hash: String,
+    pub jwt_signer: Arc<aspectus_auth::jwt::JwtSigner>,
+    pub api_key_creator: Arc<aspectus_auth::ApiKeyCreator>,
+    pub tenant_store: Arc<aspectus_server::db::PgTenantStore>,
+    pub service_account_store: Arc<aspectus_server::db::PgServiceAccountStore>,
+}
+
+pub async fn build_app_with() -> anyhow::Result<TestApp> {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".into());
 
@@ -57,6 +71,7 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
     let api_key_store = Arc::new(PgApiKeyStore::new(pool.clone()));
     let api_key_verifier = Arc::new(ApiKeyVerifier::new(api_key_store.clone(), auth_cache));
     let api_key_creator = Arc::new(ApiKeyCreator::new(api_key_store.clone()));
+    let api_key_creator_for_test = api_key_creator.clone();
 
     let svc_verifier = Arc::new(ServiceTokenVerifier::new(
         Arc::new(PgServiceTokenStore::new(pool.clone())),
@@ -64,6 +79,7 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
     ));
 
     let jwt_signer = Arc::new(JwtSigner::from_env()?);
+    let jwt_signer_for_test = jwt_signer.clone();
     let jwt_verifier = Arc::new(JwtVerifier::from_env(jwt_cache)?);
 
     let scope_cache = Arc::new(RedisCache::new(redis::Client::open(redis_url.as_str())?).await?);
@@ -79,9 +95,10 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
         oauth_client_store: Arc::new(PgOAuth2ClientStore::new(pool.clone())),
         scope_cache,
         api_key_creator,
-        api_key_verifier,
+        api_key_verifier: api_key_verifier.clone(),
+        token_verifier: Arc::new(TokenVerifier::new(api_key_verifier.clone(), jwt_verifier.clone())),
         svc_token_verifier: svc_verifier.clone(),
-        jwt_signer,
+        jwt_signer: jwt_signer.clone(),
         jwt_verifier,
         pool: pool.clone(),
     };
@@ -121,13 +138,20 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
         .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
         .route("/authorize", post(aspectus_server::routes::oauth::authorize))
         .route("/oauth/token", post(aspectus_server::routes::oauth::token))
-        .with_state(state)
+        .with_state(state.clone())
         .merge(mgmt)
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(1024 * 16))
         .layer(TraceLayer::new_for_http());
 
-    Ok((app, token_hash))
+    Ok(TestApp {
+        router: app,
+        token_hash,
+        jwt_signer: jwt_signer_for_test,
+        api_key_creator: api_key_creator_for_test,
+        tenant_store: state.tenant_store.clone(),
+        service_account_store: state.service_account_store.clone(),
+    })
 }
 
 pub fn service_token_header() -> String {

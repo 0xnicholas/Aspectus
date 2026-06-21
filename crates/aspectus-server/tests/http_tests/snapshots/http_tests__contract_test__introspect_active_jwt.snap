@@ -1,0 +1,16 @@
+---
+source: crates/aspectus-server/tests/http_tests/contract_test.rs
+assertion_line: 483
+expression: stable
+---
+{
+  "active": true,
+  "client_id": "pandaria",
+  "exp_is_int": true,
+  "identity_type": "service_account",
+  "scope": "pandaria:session:create pandaria:session:read",
+  "tenant_id": "<JWT-tenant>",
+  "token_format": "jwt",
+  "token_type": "Bearer",
+  "user_id": "<KSUID>"
+}
