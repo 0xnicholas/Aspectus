@@ -5,6 +5,7 @@ use anyhow::Context;
 use axum::{middleware, Router, extract::DefaultBodyLimit, routing::{delete, get, post, put}};
 use axum::http::header;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -187,6 +188,10 @@ async fn main() -> anyhow::Result<()> {
         )
         .with_state(state)
         .merge(mgmt)
+        // Admin console (React SPA) — served from the same process.
+        // Run `cd console && npm run build` before deploying.
+        .nest_service("/admin", ServeDir::new("console/dist")
+            .fallback(ServeFile::new("console/dist/index.html")))
         .layer(CorsLayer::permissive())
         .layer(DefaultBodyLimit::max(1024 * 16))
         .layer(middleware::from_fn(add_security_headers))
