@@ -151,6 +151,8 @@ Phase 2（Aspectus 上线后）：entity_id = tenant_id:user_id
 | **Token Introspection** |  RFC 7662 端点，验证 token 有效性并返回关联的 tenant/user/scopes。 |
 | **Quota（配额）** | per-tenant 的资源限制配置。Aspectus 只存配置，不执行。 |
 
+> 生态项目（Pandaria / Tavern / Constell / Tokencamp / Heirloom）如何接入 Aspectus，参见 [消费者接入指南](docs/consumer-integration.md)。
+
 ---
 
 ## API 设计

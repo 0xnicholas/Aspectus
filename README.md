@@ -59,6 +59,8 @@ curl http://localhost:3100/health
 
 完整 API 文档见 [docs/openapi.yaml](docs/openapi.yaml)。
 
+> **生态项目接入**（Pandaria / Tavern / Constell / Tokencamp / Heirloom）：如何把 Aspectus 接入你的服务网关，参见 [消费者接入指南](docs/consumer-integration.md)。涵盖完整中间件实现、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。
+
 ## 两步登录流程（ADR-016）
 
 `alice@example.com` 同一个邮箱可以在多个租户下注册（schema `UNIQUE (tenant_id, email)`）。

@@ -29,6 +29,10 @@ Aspectus 项目的架构决策记录。每条 ADR 记录一个重要的架构决
 - **项目上下文**：[AGENTS.md](../../AGENTS.md) — Aspectus 总体架构和原则
 - **概念细化**：[concepts-and-architecture-design.md](../superpowers/specs/2026-05-29-concepts-and-architecture-design.md) — brainstorming 后的概念细化
 
+## 实施参考
+
+- **[消费者接入指南](../consumer-integration.md)** — 面向 Pandaria / Tavern / Constell / Tokencamp / Heirloom 等生态项目的工程师，说明如何把 Aspectus 接入项目网关。涵盖完整中间件代码、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。引用了 ADR-001 / ADR-002 / ADR-003 / ADR-011。
+
 ## ADR 格式
 
 每条 ADR 遵循以下结构：
