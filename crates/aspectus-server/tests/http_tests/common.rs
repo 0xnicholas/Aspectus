@@ -23,7 +23,7 @@ use aspectus_server::db::{
 use aspectus_server::middleware::auth::service_token_auth;
 use aspectus_server::AppState;
 
-const SERVICE_TOKEN: &str = "http-test-service-token";
+const SERVICE_TOKEN: &str = "aspectus-dev-pandaria-service-token";
 
 pub async fn build_app() -> anyhow::Result<(Router, String)> {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -31,10 +31,18 @@ pub async fn build_app() -> anyhow::Result<(Router, String)> {
 
     let pool = sqlx::PgPool::connect(&db_url).await?;
 
-    // Seed service token
+    // Seed service token using ON CONFLICT DO NOTHING — relies on the
+    // migration `20260531000003_seed_service_tokens.sql` having already
+    // inserted this token. The token value (`SERVICE_TOKEN` above) MUST
+    // match the value seeded by migration #3 so this INSERT is a no-op
+    // when migrations have been applied.
+    //
+    // If you see `401 Invalid Service Token` from these tests, you likely
+    // need to re-run migrations:
+    //   sqlx migrate run
     let token_hash = hex::encode(Sha256::digest(SERVICE_TOKEN.as_bytes()));
     let _ = sqlx::query(
-        "INSERT INTO service_tokens (project, token_hash) VALUES ($1, $2) ON CONFLICT (project) DO UPDATE SET token_hash = $2",
+        "INSERT INTO service_tokens (project, token_hash) VALUES ($1, $2) ON CONFLICT (project) DO NOTHING",
     )
     .bind(aspectus_core::project::Project::Pandaria)
     .bind(&token_hash)
