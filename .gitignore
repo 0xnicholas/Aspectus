@@ -24,3 +24,6 @@ pgdata/
 
 /_references
 node_modules/
+
+# PR description drafts (local-only, not for commit)
+docs/.pr/
