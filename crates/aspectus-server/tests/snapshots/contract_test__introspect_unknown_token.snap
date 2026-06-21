@@ -1,0 +1,7 @@
+---
+source: crates/aspectus-server/tests/http_tests/contract_test.rs
+expression: body
+---
+{
+  "active": false
+}

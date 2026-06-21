@@ -325,7 +325,7 @@ Aspectus/
 
 - 单元测试：Token 签发/验证、API Key 哈希、scope 匹配逻辑
 - 集成测试：`testcontainers` 启动 PostgreSQL + Redis，测试完整自省流程
-- 契约测试：确保自省响应格式与 Pandaria/Tavern 的期望一致
+- 契约测试：确保自省响应格式与 Pandaria/Tavern 的期望一致。详见 [docs/contract-testing.md](docs/contract-testing.md) 与 `crates/aspectus-server/tests/http_tests/contract_test.rs`（基于 `insta` snapshot）
 - 性能测试：`POST /introspect` ——目标 p95 < 5ms（含 Redis 缓存命中）
 
 ---

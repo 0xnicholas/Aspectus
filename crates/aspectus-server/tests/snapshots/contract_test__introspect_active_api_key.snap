@@ -1,0 +1,14 @@
+---
+source: crates/aspectus-server/tests/http_tests/contract_test.rs
+expression: stable_active_view(&body)
+---
+{
+  "active": true,
+  "client_id": "pandaria",
+  "identity_type": "service_account",
+  "scope": "pandaria:session:create pandaria:session:read",
+  "tenant_id": "<KSUID>",
+  "token_format": "api_key",
+  "token_type": "Bearer",
+  "user_id": "<KSUID>"
+}

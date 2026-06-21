@@ -4,6 +4,7 @@
 //! Run with: `cargo test -p aspectus-server --test http_tests`
 
 mod common;
+mod contract_test;
 mod introspect_test;
 mod oauth_test;
 mod management_test;
