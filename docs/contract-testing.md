@@ -196,9 +196,73 @@ thread 'introspect_active_api_key_contract' panicked at 'snapshot assertion fail
 
 ## Future 改进
 
-- [ ] **JSON Schema 验证** — 用 `jsonschema` crate 从 `openapi.yaml` 派生 schema，每条响应都严格匹配。比 snapshot 更严：能捕捉「字段被静默删除」
-- [ ] **JWT 完整覆盖** — 当前只测 API Key。补 JWT 的 active/inactive snapshot
-- [ ] **Opaque token 覆盖** — 同上
+- [x] **JSON Schema 验证** — 已完成（v0.9.1+）。详见下文 §Schema 验证（`jsonschema`）。
+- [x] **JWT 完整覆盖** — 已完成（v0.9.1+）：`introspect_active_jwt_contract` + `introspect_expired_jwt_contract`
+- [x] **Opaque token 覆盖** — 已完成（v0.9.1+）：`introspect_active_opaque_contract`
 - [ ] **Performance contract** — 加一个 benchmark 验证 p95 < 5ms（ADR-001 承诺）
 - [ ] **JWKS schema 验证** — `/.well-known/jwks.json` 也应该有契约测试
 - [ ] **Multi-tenant 隔离验证** — 验证 token A 不能看到 tenant B 的任何信息（即使 active=true）
+
+## Schema 验证（`jsonschema`）
+
+除了 snapshot 之外，每次 /introspect 响应还会经过严格 JSON Schema 验证。
+
+Schema 定义（`contract_test::introspect_schema`）：
+
+```json
+{
+  "type": "object",
+  "required": ["active"],
+  "properties": {
+    "active": { "type": "boolean" },
+    "tenant_id": { "type": "string" },
+    "user_id": { "type": "string" },
+    "identity_type": { "enum": ["user", "service_account"] },
+    "client_id": { "type": "string" },
+    "scope": { "type": "string" },
+    "token_type": { "type": "string" },
+    "token_format": { "enum": ["api_key", "jwt", "opaque"] },
+    "exp": { "type": "integer", "minimum": 0 },
+    "quotas": { "type": "object" }
+  },
+  "additionalProperties": false,
+  "if": { "properties": { "active": { "const": true } } },
+  "then": {
+    "required": ["tenant_id", "user_id", "identity_type",
+                  "client_id", "scope", "token_type", "token_format"]
+  }
+}
+```
+
+**3 个保证**：
+
+| 保障 | 机制 | 捕捉的回归 |
+|------|------|-----------|
+| 未知字段 | `additionalProperties: false` | 静默新增字段（如不小心返回了内部状态） |
+| active=true 必填字段 | `if/then` + `required` | 签名后忘记填充 `client_id` 等 |
+| 类型正确 | `type` / `enum` | `active` 变字符串、`token_format` 加新值 |
+
+### Schema 自己的测试（5 个）
+
+为了保证 schema 不是「摆设」，加了：
+
+```rust
+schema_accepts_valid_active_response     // valid active response passes
+schema_accepts_valid_inactive_response   // {active:false} alone passes
+schema_rejects_unknown_field             // catches leaked secret fields
+schema_rejects_missing_required_fields_when_active
+schema_rejects_wrong_active_type         // active must be boolean
+```
+
+这意味着如果 schema 本身写错（比如漏掉 required），这些测试会失败。
+
+### Snapshot vs Schema：双层保护
+
+| 变更类型 | 哪个 catch |
+|----------|-----------|
+| 字段被**删除** | snapshot（旧 snapshot 找不到匹配） |
+| 字段被**重命名** | snapshot |
+| 字段被**新增** | schema（`additionalProperties: false`） |
+| active=true 缺必填 | schema（`if/then`） |
+| 字段**类型变了** | 两者都 catch |
+| 字段**值变了**（如 scope 从字符串变数组） | snapshot |

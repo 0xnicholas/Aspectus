@@ -37,6 +37,21 @@
 //!
 //! ```bash
 //! cargo insta accept    # accept all pending snapshot changes
+//! ```
+//!
+//! ## Schema validation (`jsonschema`)
+//!
+//! In addition to the snapshot tests, every response is also validated
+//! against a strict JSON Schema derived from the [`IntrospectResponse`]
+//! struct definition. The schema rejects:
+//! - **Unknown fields** (`additionalProperties: false`) — catches silent
+//!   field additions that consumers wouldn't know to ignore.
+//! - **Missing required fields when active=true** — via `if/then`,
+//!   enforces `tenant_id`, `user_id`, `identity_type`, `client_id`,
+//!   `scope`, `token_type`, `token_format` must all be present.
+//! - **Wrong types** — e.g., `active` must always be boolean.
+//!
+//! Together with snapshots, this gives strong contract guarantees:
 //! cargo insta review    # interactively review each diff
 //! ```
 //!
@@ -154,7 +169,74 @@ async fn post_introspect(app: &axum::Router, token: &str) -> (StatusCode, Value,
         .to_string();
     let body = axum::body::to_bytes(resp.into_body(), 8192).await.unwrap();
     let json: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+
+    // Strict JSON Schema validation — catches silent field additions
+    // (additionalProperties: false) and missing required fields when active=true.
+    // This complements the snapshot tests, which catch value-level changes.
+    if status == StatusCode::OK && content_type.starts_with("application/json") && json.is_object() {
+        let validator = introspect_schema();
+        if let Err(errors) = validator.validate(&json) {
+            let msgs: Vec<String> = errors.map(|e| format!("  - at `{}`: {}", e.instance_path, e)).collect();
+            panic!(
+                "IntrospectResponse failed strict schema validation:\n{}\n\nactual JSON: {}",
+                msgs.join("\n"),
+                serde_json::to_string_pretty(&json).unwrap_or_default(),
+            );
+        }
+    }
+
     (status, json, content_type)
+}
+
+/// Strict JSON Schema for the `/introspect` response.
+///
+/// Derived from `aspectus_core::introspect::IntrospectResponse`.
+/// The schema rejects:
+/// - Unknown fields (catches silent field additions)
+/// - Wrong types
+/// - Missing required fields when `active: true`
+///
+/// Source of truth for field requirements:
+///   aspectus_core/src/introspect.rs (IntrospectResponse struct)
+fn introspect_schema() -> jsonschema::JSONSchema {
+    let schema = serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["active"],
+        "properties": {
+            "active": { "type": "boolean" },
+            "tenant_id": { "type": "string" },
+            "user_id": { "type": "string" },
+            "identity_type": {
+                "type": "string",
+                "enum": ["user", "service_account"]
+            },
+            "client_id": { "type": "string" },
+            "scope": { "type": "string" },
+            "token_type": { "type": "string" },
+            "token_format": {
+                "type": "string",
+                "enum": ["api_key", "jwt", "opaque"]
+            },
+            "exp": { "type": "integer", "minimum": 0 },
+            "quotas": { "type": "object" }
+        },
+        "additionalProperties": false,
+        "if": {
+            "properties": { "active": { "const": true } },
+            "required": ["active"]
+        },
+        "then": {
+            "required": [
+                "tenant_id", "user_id", "identity_type",
+                "client_id", "scope", "token_type", "token_format"
+            ]
+        }
+    });
+    jsonschema::JSONSchema::options()
+        .with_draft(jsonschema::Draft::Draft7)
+        .compile(&schema)
+        .expect("compile introspect JSON schema")
 }
 
 /// Build a snapshot-friendly view of the active response.
@@ -419,6 +501,71 @@ async fn introspect_inactive_omits_identity_fields() {
             "inactive response must not contain `{forbidden}` (RFC 7662 information hiding), got: {body}",
         );
     }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Schema validation smoke tests
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Verify the JSON Schema validator actually rejects malformed responses.
+// Without these, a typo in the schema would silently make all tests pass.
+
+#[test]
+fn schema_rejects_unknown_field() {
+    let v = introspect_schema();
+    let bad = serde_json::json!({
+        "active": false,
+        "secret_token_hash_leaked": "should-never-appear"
+    });
+    assert!(v.validate(&bad).is_err(),
+        "schema must reject unknown fields (additionalProperties: false)");
+}
+
+#[test]
+fn schema_rejects_missing_required_fields_when_active() {
+    let v = introspect_schema();
+    let bad = serde_json::json!({
+        "active": true
+        // tenant_id, user_id, identity_type, client_id, scope, token_type, token_format missing
+    });
+    let errors: Vec<_> = v.validate(&bad).unwrap_err().collect();
+    assert!(!errors.is_empty(), "schema must reject active=true without required fields");
+    let err_text: String = errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n");
+    assert!(err_text.contains("tenant_id") || err_text.contains("required"),
+        "error should mention missing required fields, got: {err_text}");
+}
+
+#[test]
+fn schema_rejects_wrong_active_type() {
+    let v = introspect_schema();
+    let bad = serde_json::json!({"active": "true"}); // string, not bool
+    assert!(v.validate(&bad).is_err(),
+        "schema must reject `active` as non-boolean");
+}
+
+#[test]
+fn schema_accepts_valid_inactive_response() {
+    let v = introspect_schema();
+    let good = serde_json::json!({"active": false});
+    assert!(v.validate(&good).is_ok(),
+        "schema must accept minimal {{active: false}}");
+}
+
+#[test]
+fn schema_accepts_valid_active_response() {
+    let v = introspect_schema();
+    let good = serde_json::json!({
+        "active": true,
+        "tenant_id": "t1",
+        "user_id": "u1",
+        "identity_type": "service_account",
+        "client_id": "pandaria",
+        "scope": "pandaria:session:create",
+        "token_type": "Bearer",
+        "token_format": "api_key"
+    });
+    assert!(v.validate(&good).is_ok(),
+        "schema must accept full active response");
 }
 
 // ────────────────────────────────────────────────────────────────────────
