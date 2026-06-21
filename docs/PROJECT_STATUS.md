@@ -1,6 +1,6 @@
 # Aspectus — Project Status
 
-> 日期：2026-06-20
+> 日期：2026-06-21
 > 版本：v0.9.0
 
 ## Overview
@@ -145,6 +145,7 @@ Build:      248KB JS (78KB gzipped)
 | [docs/specs/](specs/) | 7 Technical specifications |
 | [docs/comparison-with-logto.md](comparison-with-logto.md) | Logto comparison |
 | [docs/console-comparison.md](console-comparison.md) | Console comparison |
+| [docs/consumer-integration.md](consumer-integration.md) | **生态项目接入指南** — 面向 Pandaria / Tavern / Constell / Tokencamp / Heirloom 等消费者项目的完整接入参考（中间件代码、错误处理矩阵、灰度与回滚） |
 
 ## Design Principles
 
@@ -158,7 +159,8 @@ Build:      248KB JS (78KB gzipped)
 
 | Priority | Item |
 |:--------:|------|
-| P1 | Pandaria api-gateway integration |
+| ✅ | Pandaria api-gateway 接入参考（consumer-integration.md 完成 2026-06-21） |
+| ⬜ | Pandaria api-gateway 生产灰度与完全切换 |
 | P1 | Tavern / Constell / Tokencamp integration |
 | P2 | Heirloom data-level authorization |
 | P2 | Emerald entity_id migration |
