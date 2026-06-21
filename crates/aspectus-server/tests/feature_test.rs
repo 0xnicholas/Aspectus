@@ -216,10 +216,18 @@ async fn password_reset_token_lifecycle() {
     assert!(second.is_none(), "Reset token should be one-time use");
 
     // 4. Expired tokens are rejected
+    //
+    // token_hash column is varchar(64), so we cannot append a suffix to the
+    // 64-char sha256 hex. Instead, generate a separate 64-char hash for the
+    // expired token.
+    let mut expired_raw = [0u8; 32];
+    getrandom::getrandom(&mut expired_raw).unwrap();
+    let expired_token = hex::encode(expired_raw);
+    let expired_hash = hex::encode(Sha256::digest(expired_token.as_bytes()));
     sqlx::query(
         "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES ($1, $2, $3)",
     )
-    .bind(&format!("{token_hash}-expired"))
+    .bind(&expired_hash)
     .bind(&user.id)
     .bind(chrono::Utc::now() - chrono::Duration::hours(1))
     .execute(&pool)
@@ -231,7 +239,7 @@ async fn password_reset_token_lifecycle() {
          WHERE token_hash = $1 AND used = false AND expires_at > NOW() \
          RETURNING user_id",
     )
-    .bind(&format!("{token_hash}-expired"))
+    .bind(&expired_hash)
     .fetch_optional(&pool)
     .await
     .unwrap();
