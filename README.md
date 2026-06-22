@@ -6,7 +6,9 @@ Pandaria 生态的统一身份与多租户管理服务。
 
 Aspectus 是 Pandaria 生态的单一身份源，为所有项目提供统一的 `tenant_id`、用户认证、API Key 管理、Token 自省和租户配额配置。
 
-当前生态中每个项目各自管理身份（Pandaria 用 HMAC token、Tavern 用 Bearer token、Emerald 用 API Key、Constell 用 NextAuth）。Aspectus 将这些分散的身份孤岛统一为一个可审计、可治理的单一身份层。
+当前生态中每个项目各自管理身份（Pandaria 用 HMAC token、Emerald 用 API Key、Constell 用 NextAuth）。Aspectus 将这些分散的身份孤岛统一为一个可审计、可治理的单一身份层。
+
+> **2026-06-21 更新**：Tavern 已合并入 Pandaria 作为子系统（位于 `pandaria/crates/tavern-*`），不再作为独立生态消费者。Aspectus 侧不再为 Tavern 维护独立的 Project 枚举值、scope、Service Token。
 
 ## 快速开始
 
@@ -59,7 +61,7 @@ curl http://localhost:3100/health
 
 完整 API 文档见 [docs/openapi.yaml](docs/openapi.yaml)。
 
-> **生态项目接入**（Pandaria / Tavern / Constell / Tokencamp / Heirloom）：如何把 Aspectus 接入你的服务网关，参见 [消费者接入指南](docs/consumer-integration.md)。涵盖完整中间件实现、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。
+> **生态项目接入**（Pandaria / Constell / Tokencamp / Heirloom / Emerald）：如何把 Aspectus 接入你的服务网关，参见 [消费者接入指南](docs/consumer-integration.md)。涵盖完整中间件实现、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。
 
 ## 两步登录流程（ADR-016）
 

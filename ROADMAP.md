@@ -176,7 +176,7 @@ cargo run -p aspectus-server     # GET /health → 200
 | Redis 自省结果缓存 | 配额配置 API（quota 字段预留但不生效） |
 | 审计日志（append-only） | Role 定义 / Scope 通配符匹配 |
 | Service Token 认证调用方 | 多 Project scope 校验（scope 按自由文本接受） |
-| Pandaria 接入 | Tavern / Constell / Tokencamp 接入 |
+| Pandaria 接入 | Constell / Tokencamp 接入 |
 
 ### 版本内部迭代
 
@@ -302,9 +302,9 @@ v0.2.0 ──→ v0.2.1 (bug fix) ──→ v0.2.2 (性能调优) ──→ v0.2
 
 | 属性 | 值 |
 |------|-----|
-| **目标** | Tavern、Constell、Tokencamp 接入 `/introspect`。配额配置 API 可用 |
+| **目标** | Constell、Tokencamp 接入 `/introspect`。配额配置 API 可用 |
 | **产出** | 多 Project scope 定义、配额管理 API、Daypaw 管理 UI |
-| **消费者** | Pandaria（不变）, Tavern, Constell, Tokencamp |
+| **消费者** | Pandaria（不变）, Constell, Tokencamp |
 | **前置依赖** | v0.2.0（`/introspect` + 管理 API） |
 | **被依赖** | v1.0.0 |
 | **API 稳定性** | ⚠️ 不稳定——`/introspect` 响应新增 `quotas` 字段，v0.2.x 消费者不受影响（新字段被忽略）。管理 API 新增端点，不影响已有端点 |
@@ -317,7 +317,7 @@ v0.2.0 ──→ v0.2.1 (bug fix) ──→ v0.2.2 (性能调优) ──→ v0.2
 | 所有 6 个 Project 的 scope 定义 + 校验 | User 管理 |
 | `PUT /tenants/{id}/quotas` | OAuth2 / JWT |
 | `/introspect` 响应新增 `quotas` 字段 | Role 定义（role_type 约束在 DB schema 已存在，但 Role 数据不填充） |
-| Tavern / Constell / Tokencamp 接入 | Service Account 通过 Role 获得 scope（Phase 2 SA 仍直接绑 scope） |
+| Constell / Tokencamp 接入 | Service Account 通过 Role 获得 scope（Phase 2 SA 仍直接绑 scope） |
 | Daypaw API Key 管理 UI | Emerald entity_id 迁移 |
 
 ### 与 v0.2.0 的关系
@@ -330,7 +330,7 @@ v0.2.0 消费者（Pandaria）
   │
   │  → Pandaria 无需修改代码，忽略 quotas 字段即可正常工作
   │
-  v0.3.0 新消费者（Tavern, Constell, Tokencamp）
+  v0.3.0 新消费者（Constell, Tokencamp）
   │
   │  直接对接 v0.3.0 的 /introspect，可选使用 quotas 字段
 ```
@@ -346,7 +346,6 @@ v0.2.0 消费者（Pandaria）
 | Project | Scope 示例 |
 |---------|-----------|
 | `pandaria` | `pandaria:session:create`, `pandaria:session:read`, `pandaria:session:delete`, `pandaria:agent:execute`, `pandaria:agent:manage` |
-| `tavern` | `tavern:workflow:run`, `tavern:workflow:deploy`, `tavern:workflow:read`, `tavern:workflow:manage` |
 | `constell` | `constell:agent:publish`, `constell:agent:install`, `constell:agent:read` |
 | `tokencamp` | `tokencamp:token:consume`, `tokencamp:token:meter`, `tokencamp:token:manage` |
 | `heirloom` | `heirloom:resource:read`, `heirloom:policy:read`, `heirloom:policy:manage` |
@@ -374,7 +373,6 @@ v0.2.0 消费者（Pandaria）
 2. 项目侧：引入 `aspectus-client`（或 HTTP client）→ 在请求处理链中调 `/introspect`
 3. 验证：端到端测试通过
 
-- [ ] **Tavern**：tavern-server 接收请求 → 调 `/introspect` → 注入 `tenant_id`/`scopes`
 - [ ] **Constell**：web + worker 调 `/introspect` 验证 API Key
 - [ ] **Tokencamp**：调 `/introspect` + 读取 `quotas.tokencamp` 字段执行限流
 - [ ] Heirloom：v0.3.0 不接入（数据级授权需要 v1.0.0 的 User 身份），但 scope 预定义
@@ -393,7 +391,7 @@ v0.2.0 消费者（Pandaria）
 ✅ v0.2.0 创建的 API Key 仍可正常自省（不因 scope 校验失败而中断）
 ✅ PUT /tenants/{id}/quotas → 写入成功 → GET 返回正确值
 ✅ /introspect 响应含 quotas 字段（限当前 project 的配额）
-✅ Tavern / Constell / Tokencamp 正常调用 /introspect
+✅ Constell / Tokencamp 正常调用 /introspect
 ✅ Daypaw 可完成「查看列表 → 创建 → 查看 → 吊销」完整流程
 ```
 
@@ -403,7 +401,7 @@ v0.2.0 消费者（Pandaria）
 |------|------|
 | v0.3.1 | Bug fix：配额边界条件、scope 校验误报 |
 | v0.3.2 | Daypaw UI 体验优化 |
-| v0.3.3+ | Tavern/Constell/Tokencamp 集成反馈 |
+| v0.3.3+ | Constell/Tokencamp 集成反馈 |
 
 ### 参考资料
 
@@ -419,7 +417,7 @@ v0.2.0 消费者（Pandaria）
 |------|-----|
 | **目标** | 人类用户可登录，完整身份平台上线。API 进入长期稳定 |
 | **产出** | User CRUD + OAuth2 Authorization Code flow + JWT + Role 分配 + Emerald 迁移 |
-| **消费者** | 全部生态项目（Pandaria, Tavern, Constell, Tokencamp, Heirloom） |
+| **消费者** | 全部生态项目（Pandaria, Constell, Tokencamp, Heirloom） |
 | **前置依赖** | v0.3.0（`/introspect` + 配额 + scope 定义） |
 | **API 稳定性** | ✅ **长期稳定**。此后 `/introspect` 格式和管理 API 签名受 semver 保护 |
 | **周期** | 3-4 周 |
@@ -489,10 +487,10 @@ v0.3.0 消费者
 | Role | type | scopes |
 |------|------|--------|
 | `tenant-admin` | both | 管理 API 全权限（不映射到 scope，通过管理 API 认证单独控制） |
-| `agent-developer` | user | `pandaria:session:*, pandaria:agent:*, tavern:workflow:run, tavern:workflow:read, constell:agent:publish` |
-| `agent-operator` | user | `pandaria:session:read, pandaria:agent:execute, tavern:workflow:run` |
+| `agent-developer` | user | `pandaria:session:*, pandaria:agent:*, constell:agent:publish` |
+| `agent-operator` | user | `pandaria:session:read, pandaria:agent:execute` |
 | `project-admin` | user | 单个 project 的全部 scope（创建 API Key 时裁剪） |
-| `ci-deployer` | service_account | `pandaria:session:create, tavern:workflow:deploy` |
+| `ci-deployer` | service_account | `pandaria:session:create` |
 
 - [ ] `users_roles` 关联表：将 Role 分配给 User
 - [ ] `role_type` DB check constraint（User 只能赋予 type=`user`/`both` 的 Role；SA 同理）
@@ -531,7 +529,7 @@ v0.3.0 消费者
 ✅ 已有 SA + API Key 路径完全不受影响
 ✅ Emerald entity_id = tenant_id:user_id（User session），= tenant_id（SA session）
 ✅ Heirloom 可正常调用 /introspect
-✅ v0.2.0 / v0.3.0 消费者（Pandaria、Tavern、Constell、Tokencamp）零修改运行
+✅ v0.2.0 / v0.3.0 消费者（Pandaria、Constell、Tokencamp）零修改运行
 ```
 
 ### v1.0.x patch 版本（预期）
@@ -591,7 +589,6 @@ v0.1.0: 所有表建好（空）
 | 消费者 | v0.2.0 | v0.3.0 | v1.0.0 |
 |------|:--:|:--:|:--:|
 | **Pandaria** | 首次接入 | 无修改 | 无修改（可选：Emerald entity_id 升级） |
-| **Tavern** | — | 首次接入 | 无修改 |
 | **Constell** | — | 首次接入 | 无修改 |
 | **Tokencamp** | — | 首次接入 | 无修改 |
 | **Heirloom** | — | — | 首次接入 |
