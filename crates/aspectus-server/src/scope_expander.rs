@@ -84,10 +84,11 @@ mod tests {
 
     #[test]
     fn projects_from_scopes_basic() {
-        let scopes = "pandaria:session:read pandaria:agent:execute tavern:workflow:run";
+        let scopes = "pandaria:session:read pandaria:agent:execute constell:agent:read";
+        // BTreeSet gives alphabetical order, not insertion order
         assert_eq!(
             projects_from_scopes(scopes),
-            vec!["pandaria".to_string(), "tavern".to_string()]
+            vec!["constell".to_string(), "pandaria".to_string()]
         );
     }
 
@@ -129,7 +130,7 @@ mod tests {
 
     #[test]
     fn projects_from_scopes_sorted_stable() {
-        let scopes = "tavern:workflow:run pandaria:session:read constell:agent:publish";
+        let scopes = "constell:agent:publish pandaria:session:read tokencamp:monthly:read";
         let result = projects_from_scopes(scopes);
         // BTreeSet gives alphabetical order, not insertion order
         assert_eq!(
@@ -137,7 +138,7 @@ mod tests {
             vec![
                 "constell".to_string(),
                 "pandaria".to_string(),
-                "tavern".to_string(),
+                "tokencamp".to_string(),
             ]
         );
     }

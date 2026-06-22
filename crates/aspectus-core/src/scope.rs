@@ -3,7 +3,7 @@ use sqlx::FromRow;
 
 /// Permission label in `project:resource:action` format (ADR-006).
 ///
-/// Examples: `pandaria:session:create`, `tavern:workflow:run`.
+/// Examples: `pandaria:session:create`, `constell:agent:read`.
 /// Supports `*` wildcard for whole-segment matching.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Scope {

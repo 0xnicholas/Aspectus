@@ -11,6 +11,12 @@
 create type identity_type as enum ('user', 'service_account');
 
 -- 项目枚举：生态中的所有系统 (ADR-010)
+--
+-- History: Originally included 'tavern' as a separate ecosystem project.
+-- As of 2026-06-21, Tavern has been merged into Pandaria as a subsystem.
+-- The 'tavern' enum value is retained for backwards compatibility with
+-- existing rows in service_tokens / api_keys / audit_logs; see migration
+-- #15 (20260621000015_remove_tavern.sql) for details.
 create type project as enum (
     'pandaria',
     'tavern',

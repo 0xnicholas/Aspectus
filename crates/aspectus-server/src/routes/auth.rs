@@ -721,9 +721,9 @@ mod tests {
 
     #[test]
     fn login_request_custom_client_id() {
-        let json = r#"{"email":"a@b.com","password":"secret123","tenant_id":"org_acme","client_id":"tavern"}"#;
+        let json = r#"{"email":"a@b.com","password":"secret123","tenant_id":"org_acme","client_id":"constell"}"#;
         let req: LoginRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.client_id, "tavern");
+        assert_eq!(req.client_id, "constell");
         assert_eq!(req.tenant_id, "org_acme");
     }
 
@@ -769,11 +769,11 @@ mod tests {
 
     #[test]
     fn register_request_full() {
-        let json = r#"{"email":"a@b.com","password":"secret123","display_name":"Alice","tenant_id":"org-foo","client_id":"tavern"}"#;
+        let json = r#"{"email":"a@b.com","password":"secret123","display_name":"Alice","tenant_id":"org-foo","client_id":"constell"}"#;
         let req: RegisterRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.display_name.as_deref(), Some("Alice"));
         assert_eq!(req.tenant_id, "org-foo");
-        assert_eq!(req.client_id, "tavern");
+        assert_eq!(req.client_id, "constell");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! These tests live in **Aspectus** (not in consumer projects) because
 //! they verify the contract that Aspectus promises to consumers
-//! (Pandaria, Tavern, Constell, Tokencamp, Heirloom). Any change
+//! (Pandaria, Constell, Tokencamp, Heirloom, Emerald). Any change
 //! that breaks these tests is a **breaking change** for every consumer
 //! and must be coordinated across the ecosystem.
 //!
@@ -261,7 +261,7 @@ fn stable_active_view(body: &Value) -> Value {
 // Contract Test 1: Active API Key — the canonical contract
 // ───────────────────────────────────────────────────────────────────────────
 //
-// This is the snapshot every consumer (Pandaria, Tavern, …) depends on.
+// This is the snapshot every consumer (Pandaria, Constell, …) depends on.
 // If this snapshot changes without coordination, every consumer breaks.
 
 #[tokio::test]
@@ -375,7 +375,7 @@ async fn introspect_malformed_token_contract() {
 // Contract Test 3: Active response with quotas — the `quotas` field shape
 // ───────────────────────────────────────────────────────────────────────────
 //
-// Consumers (Pandaria, Tavern) read `quotas[<project>]` to enforce limits.
+// Consumers (Pandaria, Constell, etc.) read `quotas[<project>]` to enforce limits.
 // The shape of this subtree is part of the contract.
 
 #[tokio::test]
@@ -574,7 +574,7 @@ fn schema_accepts_valid_active_response() {
 //
 // Same contract as API Key (Test 1), but for a JWT signed with the
 // project's private key. The shape is pinned so consumers (Pandaria,
-// Tavern) parsing /introspect for JWT tokens don't break.
+// Constell, etc.) parsing /introspect for JWT tokens don't break.
 
 #[tokio::test]
 async fn introspect_active_jwt_contract() {

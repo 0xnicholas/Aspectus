@@ -277,7 +277,7 @@ mod tests {
         let exp = Utc::now() + chrono::Duration::hours(24);
         let key = ApiKey {
             id: "k2".into(), tenant_id: "t2".into(), service_account_id: "sa2".into(),
-            project: Project::Tavern, key_hash: "h2".into(), key_prefix: "p2".into(),
+            project: Project::Constell, key_hash: "h2".into(), key_prefix: "p2".into(),
             scopes: vec![], expires_at: Some(exp), revoked_at: None, created_at: Utc::now(),
         };
         let resp = build_response(&key);

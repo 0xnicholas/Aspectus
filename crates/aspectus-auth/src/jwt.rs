@@ -255,8 +255,8 @@ mod tests {
     fn jwks_key_can_verify_signed_token() {
         let signer = JwtSigner::from_env().expect("JWT signer");
         let token = signer.sign(
-            "sa-1", "t1", Project::Tavern,
-            "tavern:workflow:run",
+            "sa-1", "t1", Project::Constell,
+            "constell:agent:read",
             IdentityType::ServiceAccount, 3600,
         ).expect("sign");
 
@@ -307,8 +307,8 @@ mod tests {
     fn jwt_without_tenant_name_omits_claim() {
         let signer = JwtSigner::from_env().expect("JWT signer");
         let token = signer.sign(
-            "sa-1", "t1", Project::Tavern,
-            "tavern:workflow:run",
+            "sa-1", "t1", Project::Constell,
+            "constell:agent:read",
             IdentityType::ServiceAccount, 3600,
         ).expect("sign");
 

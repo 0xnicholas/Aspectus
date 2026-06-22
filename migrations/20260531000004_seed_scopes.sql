@@ -13,14 +13,9 @@ INSERT INTO scopes (id, name, description) VALUES
 ('sc_pa_agent_manage',   'pandaria:agent:manage',   'Register/configure agents')
 ON CONFLICT (name) DO NOTHING;
 
--- Tavern
-INSERT INTO scopes (id, name, description) VALUES
-('sc_tv_workflow_run',    'tavern:workflow:run',    'Execute a workflow'),
-('sc_tv_workflow_deploy', 'tavern:workflow:deploy', 'Deploy a workflow definition'),
-('sc_tv_workflow_read',   'tavern:workflow:read',   'Read workflow status'),
-('sc_tv_workflow_manage', 'tavern:workflow:manage', 'Create/update/delete workflows')
-ON CONFLICT (name) DO NOTHING;
-
+-- Tavern removed 2026-06-21 (merged into Pandaria). See migration
+-- #15 (20260621000015_remove_tavern.sql) which DELETEs any existing
+-- tavern:* scope rows.
 -- Constell
 INSERT INTO scopes (id, name, description) VALUES
 ('sc_co_agent_publish', 'constell:agent:publish', 'Publish an agent to the marketplace'),

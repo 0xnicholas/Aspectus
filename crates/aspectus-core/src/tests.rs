@@ -92,9 +92,8 @@ fn introspect_quotas_serialized_when_present() {
 // ---- Project enum ----
 
 #[test]
-fn project_from_str_all_six_variants() {
+fn project_from_str_all_variants() {
     assert_eq!("pandaria".parse::<Project>().unwrap(), Project::Pandaria);
-    assert_eq!("tavern".parse::<Project>().unwrap(), Project::Tavern);
     assert_eq!("emerald".parse::<Project>().unwrap(), Project::Emerald);
     assert_eq!("constell".parse::<Project>().unwrap(), Project::Constell);
     assert_eq!("tokencamp".parse::<Project>().unwrap(), Project::Tokencamp);
@@ -106,11 +105,14 @@ fn project_from_str_invalid_returns_err() {
     assert!(Project::from_str("invalid").is_err());
     assert!(Project::from_str("").is_err());
     assert!(Project::from_str("PANDARIA").is_err()); // case-sensitive
+    // Tavern was removed 2026-06-21 (merged into Pandaria). It must NOT parse.
+    assert!(Project::from_str("tavern").is_err(),
+        "tavern must no longer parse as Project (Tavern was merged into Pandaria 2026-06-21)");
 }
 
 #[test]
 fn project_display_roundtrips() {
-    for p in &[Project::Pandaria, Project::Tavern, Project::Emerald,
+    for p in &[Project::Pandaria, Project::Emerald,
                 Project::Constell, Project::Tokencamp, Project::Heirloom] {
         let s = p.to_string();
         let parsed: Project = s.parse().unwrap();
@@ -199,13 +201,13 @@ fn created_api_key_contains_raw_key() {
         id: "k1".into(),
         key: "pk_live_abc123def456".into(),
         key_prefix: "pk_live_abc123de".into(),
-        project: Project::Tavern,
-        scopes: vec!["tavern:workflow:run".into()],
+        project: Project::Constell,
+        scopes: vec!["constell:agent:read".into()],
         expires_at: None,
     };
     let json = serde_json::to_string(&created).unwrap();
     assert!(json.contains("pk_live_abc123def456"));
-    assert!(json.contains("tavern"));
+    assert!(json.contains("constell"));
 }
 
 // ---- Scope format convention ----
