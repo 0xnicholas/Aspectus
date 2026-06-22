@@ -28,7 +28,8 @@ secrets:
   jwtPrivateKeyPem: ""
   jwtPublicKeyPem: ""
   # Service tokens: base64-encoded JSON map of project→token
-  # {"pandaria": "...", "tavern": "...", ...}
+  # {"pandaria": "...", "constell": "...", ...}
+  # Note: 'tavern' removed 2026-06-21 (merged into Pandaria).
   serviceTokens: ""
 
 resources:

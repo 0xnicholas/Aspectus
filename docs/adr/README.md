@@ -31,7 +31,9 @@ Aspectus 项目的架构决策记录。每条 ADR 记录一个重要的架构决
 
 ## 实施参考
 
-- **[消费者接入指南](../consumer-integration.md)** — 面向 Pandaria / Tavern / Constell / Tokencamp / Heirloom 等生态项目的工程师，说明如何把 Aspectus 接入项目网关。涵盖完整中间件代码、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。引用了 ADR-001 / ADR-002 / ADR-003 / ADR-011。
+- **[消费者接入指南](../consumer-integration.md)** — 面向 Pandaria / Constell / Tokencamp / Heirloom / Emerald 等生态项目的工程师，说明如何把 Aspectus 接入项目网关。涵盖完整中间件代码、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。引用了 ADR-001 / ADR-002 / ADR-003 / ADR-011。
+
+> **注意 2026-06-21**：Tavern 已合并入 Pandaria 作为子系统，本指南及生态消费者列表中已移除 Tavern。历史 ADR 文件（001–016）中提及 Tavern 的内容是决策时刻的记录，未作修改（历史决策不动）。
 
 ## ADR 格式
 

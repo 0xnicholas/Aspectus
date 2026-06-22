@@ -145,7 +145,7 @@ Build:      248KB JS (78KB gzipped)
 | [docs/specs/](specs/) | 7 Technical specifications |
 | [docs/comparison-with-logto.md](comparison-with-logto.md) | Logto comparison |
 | [docs/console-comparison.md](console-comparison.md) | Console comparison |
-| [docs/consumer-integration.md](consumer-integration.md) | **生态项目接入指南** — 面向 Pandaria / Tavern / Constell / Tokencamp / Heirloom 等消费者项目的完整接入参考（中间件代码、错误处理矩阵、灰度与回滚） |
+| [docs/consumer-integration.md](consumer-integration.md) | **生态项目接入指南** — 面向 Pandaria / Constell / Tokencamp / Heirloom / Emerald 等消费者项目的完整接入参考（中间件代码、错误处理矩阵、灰度与回滚） |
 
 ## Design Principles
 
@@ -161,7 +161,7 @@ Build:      248KB JS (78KB gzipped)
 |:--------:|------|
 | ✅ | Pandaria api-gateway 接入参考（consumer-integration.md 完成 2026-06-21） |
 | ⬜ | Pandaria api-gateway 生产灰度与完全切换 |
-| P1 | Tavern / Constell / Tokencamp integration |
+| P1 | Constell / Tokencamp integration |
 | P2 | Heirloom data-level authorization |
 | P2 | Emerald entity_id migration |
 | P3 | v1.0 API stability freeze |

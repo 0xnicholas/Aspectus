@@ -1,11 +1,13 @@
 # 消费者接入指南（Aspectus v0.9.0）
 
-> 本文档面向 **Pandaria 生态消费者项目**（Pandaria / Tavern / Constell / Tokencamp / Heirloom 等）的工程师，
+> 本文档面向 **Pandaria 生态消费者项目**（Pandaria / Constell / Tokencamp / Heirloom / Emerald 等）的工程师，
 > 描述如何把 Aspectus 接入到你项目的 HTTP 网关/服务间调用中。
 >
 > 当前参考实现：Pandaria `api-gateway`（`crates/api-gateway/src/middleware/auth.rs`）。
 >
 > 文档版本：v0.9.0 · 2026-06-21
+>
+> **2026-06-21 更新**：Tavern 已合并入 Pandaria 作为子系统（位于 `pandaria/crates/tavern-*`），不再作为独立生态消费者。本指南不再涉及 Tavern 接入。
 
 ---
 
@@ -31,7 +33,7 @@ Aspectus 在每次外部请求到达消费者时的位置：
 ```
 ┌──────────┐    Bearer token     ┌──────────────────┐   POST /introspect   ┌─────────┐
 │  Client  │ ──────────────────► │ Consumer Gateway │ ──────────────────► │Aspectus │
-│ (CLI/UI) │ ◄────────────────── │ (Pandaria/Tavern)│ ◄────────────────── │ /:3100  │
+│ (CLI/UI) │ ◄────────────────── │ (Pandaria/Constell)│ ◄────────────────── │ /:3100  │
 └──────────┘   response          └──────────────────┘  IntrospectResponse └─────────┘
 ```
 
@@ -623,7 +625,7 @@ Pandaria 已有 3 个此类 e2e 测试作为参考实现。
 
 ## 附录 A：与 Pandaria 实现的差异
 
-如果你正在做第二个消费者项目（如 Tavern），以下差异值得注意：
+如果你正在做第二个消费者项目（如 Constell），以下差异值得注意：
 
 | 项 | Pandaria 当前实现 | 建议新项目做法 |
 |----|------------------|---------------|
@@ -641,7 +643,7 @@ Pandaria 已有 3 个此类 e2e 测试作为参考实现。
 A: Pandaria 选 60s。Aspectus 侧的 Redis 缓存 TTL = `min(token剩余有效期/10, 300s)`。如果你的 token TTL 较短（如 5min JWT），可以缩短消费者侧缓存到 30s。
 
 **Q: 配额在 `quotas` 的哪个子树？**
-A: 你的 project 名字（如 `pandaria`、`tavern`）。读 `quotas[<your_project>]`，missing 则按业务策略决定 fail-open/fail-closed。
+A: 你的 project 名字（如 `pandaria`、`constell`）。读 `quotas[<your_project>]`，missing 则按业务策略决定 fail-open/fail-closed。
 
 **Q: Service Token 泄露怎么办？**
 A: 立即在 Aspectus DB `DELETE FROM service_tokens WHERE project='<your_project>'`，然后签发新 token + 滚动更新。所有用旧 token 的请求会立即返回 401。
@@ -649,7 +651,7 @@ A: 立即在 Aspectus DB `DELETE FROM service_tokens WHERE project='<your_projec
 **Q: Aspectus 不可达时如何降级？**
 A: 见 §6「fail-closed vs fail-open」。默认建议 fail-closed。
 
-**Q: 一个 tenant 是否可以在多个 consumer 项目（如 Pandaria + Tavern）有 API Key？**
+**Q: 一个 tenant 是否可以在多个 consumer 项目（如 Pandaria + Constell）有 API Key？**
 A: 可以。`/api-keys` 创建时指定 `project` 字段，每个 key 绑定到单一 (tenant, project, scopes)。
 
 ---

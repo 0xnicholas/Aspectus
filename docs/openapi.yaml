@@ -162,6 +162,11 @@ components:
             （ADR-016 决策 2）。前端可用此显示"alice 可访问 Pandaria、Taver"等 UI。
           items:
             type: string
+            description: |
+              Ecosystem project. Note: 'tavern' is deprecated as of
+              2026-06-21 (Tavern merged into Pandaria). Existing rows
+              are kept for backwards compatibility; new code cannot
+              reference 'tavern'.
             enum: [pandaria, tavern, constell, tokencamp, heirloom, emerald]
 
     LoginLookupResponse:
@@ -258,6 +263,10 @@ components:
           example: "pk_live_aBcDeFgH"
         project:
           type: string
+          description: |
+            Ecosystem project. 'tavern' is deprecated 2026-06-21
+            (merged into Pandaria). Retained for backwards compat
+            with existing api_keys rows.
           enum: [pandaria, tavern, emerald, constell, tokencamp, heirloom]
         scopes:
           type: array
@@ -785,9 +794,13 @@ paths:
                   type: string
                   enum:
                     - pandaria
-                    - tavern
                     - emerald
                     - constell
+                    - tokencamp
+                    - heirloom
+                    # 'tavern' intentionally removed 2026-06-21.
+                    # Historical DB rows still contain this value; see
+                    # docs/PROJECT_STATUS.md and migration #15.
                     - tokencamp
                     - heirloom
                 scopes:

@@ -8,18 +8,18 @@
 
 AGENTS.md 明确要求：
 
-> 契约测试：确保自省响应格式与 Pandaria/Tavern 的期望一致
+> 契约测试：确保自省响应格式与 Pandaria/Constell 的期望一致
 
 契约测试是**服务端**的责任，不是消费者的责任。原因：
 
-1. **消费者多，服务端一** — Pandaria / Tavern / Constell / Tokencamp / Heirloom 各自有 1 套集成测试。契约写在 Aspectus 一处即可，5 个项目共用。
+1. **消费者多，服务端一** — Pandaria / Constell / Tokencamp / Heirloom / Emerald 各自有 1 套集成测试。契约写在 Aspectus 一处即可，5 个项目共用。
 2. **服务端先变** — 如果 Aspectus 改了 schema，Pandaria 的测试要在 Aspectus 升级后才能跑通。Aspectus 的契约测试**先**失败 → 服务端发版前就知道破坏了契约。
 3. **维护更便宜** — 5 份散落的契约测试 → 1 份集中的 schema 验证 + snapshot。
 
 如果契约测试在 Pandaria 仓库里：
 
 - Aspectus 改了 schema，Pandaria CI 才会挂（滞后反馈）
-- Tavern 等其他消费者要复制 1 套同样的测试（重复造轮）
+- Constell 等其他消费者要复制 1 套同样的测试（重复造轮）
 - Aspectus 团队没有「我的契约现在长什么样」的权威视图
 
 **契约的所有者是 Aspectus。测试也住在 Aspectus。**
@@ -178,7 +178,7 @@ thread 'introspect_active_api_key_contract' panicked at 'snapshot assertion fail
 4. **更新 snapshot** — `cargo insta review`，确认新字段符合预期
 5. **更新本文件** — 在「Active 响应」表格加一行
 6. **更新 consumer-integration.md** — 通知所有生态项目
-7. **跨仓库通知** — 在 Pandaria / Tavern 等仓库发 issue，提醒他们升级
+7. **跨仓库通知** — 在 Pandaria / Constell 等仓库发 issue，提醒他们升级
 
 ---
 
