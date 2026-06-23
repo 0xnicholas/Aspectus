@@ -8,13 +8,13 @@ use tower::ServiceExt;
 use crate::common;
 
 /// Helper: create a tenant and user for OAuth tests.
-async fn setup_user(app: &axum::Router) -> (String, String, String) {
+async fn setup_user(app: &axum::Router) -> (String, String, String, String) {
     // Create tenant
     let req = Request::builder()
         .uri("/tenants")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({"name": "oauth-test-tenant"}).to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -28,7 +28,7 @@ async fn setup_user(app: &axum::Router) -> (String, String, String) {
         .uri("/users")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({
             "tenant_id": &tenant_id,
             "email": &email,
@@ -46,7 +46,7 @@ async fn setup_user(app: &axum::Router) -> (String, String, String) {
         .uri("/clients")
         .method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({
             "name": "test-client",
             "redirect_uris": ["https://example.com/cb"]
@@ -56,8 +56,9 @@ async fn setup_user(app: &axum::Router) -> (String, String, String) {
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
     let client: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let client_id = client["client_id"].as_str().unwrap().to_string();
+    let client_secret = client["client_secret"].as_str().unwrap().to_string();
 
-    (tenant_id, email, client_id)
+    (tenant_id, email, client_id, client_secret)
 }
 
 #[tokio::test]
@@ -75,7 +76,7 @@ async fn list_clients_requires_auth() {
 #[tokio::test]
 async fn authorize_wrong_password_returns_401() {
     let (app, _) = common::build_app().await.unwrap();
-    let (_, email, client_id) = setup_user(&app).await;
+    let (tenant_id, email, client_id, _client_secret) = setup_user(&app).await;
 
     let req = Request::builder()
         .uri("/authorize")
@@ -83,6 +84,7 @@ async fn authorize_wrong_password_returns_401() {
         .header("Content-Type", "application/json")
         .body(Body::from(json!({
             "email": email,
+            "tenant_id": &tenant_id,
             "password": "wrong-password",
             "client_id": client_id,
             "redirect_uri": "https://example.com/cb"
@@ -95,7 +97,7 @@ async fn authorize_wrong_password_returns_401() {
 #[tokio::test]
 async fn authorize_invalid_client_returns_422() {
     let (app, _) = common::build_app().await.unwrap();
-    let (_, email, _) = setup_user(&app).await;
+    let (tenant_id, email, _, _) = setup_user(&app).await;
 
     let req = Request::builder()
         .uri("/authorize")
@@ -103,6 +105,7 @@ async fn authorize_invalid_client_returns_422() {
         .header("Content-Type", "application/json")
         .body(Body::from(json!({
             "email": email,
+            "tenant_id": &tenant_id,
             "password": "oauth-password-123",
             "client_id": "nonexistent-client",
             "redirect_uri": "https://example.com/cb"
@@ -115,7 +118,7 @@ async fn authorize_invalid_client_returns_422() {
 #[tokio::test]
 async fn authorize_invalid_redirect_uri_returns_422() {
     let (app, _) = common::build_app().await.unwrap();
-    let (_, email, client_id) = setup_user(&app).await;
+    let (tenant_id, email, client_id, _client_secret) = setup_user(&app).await;
 
     let req = Request::builder()
         .uri("/authorize")
@@ -123,6 +126,7 @@ async fn authorize_invalid_redirect_uri_returns_422() {
         .header("Content-Type", "application/json")
         .body(Body::from(json!({
             "email": email,
+            "tenant_id": &tenant_id,
             "password": "oauth-password-123",
             "client_id": client_id,
             "redirect_uri": "https://evil.com/steal"
@@ -135,7 +139,7 @@ async fn authorize_invalid_redirect_uri_returns_422() {
 #[tokio::test]
 async fn full_oauth2_authorization_code_flow() {
     let (app, _) = common::build_app().await.unwrap();
-    let (_, email, client_id) = setup_user(&app).await;
+    let (tenant_id, email, client_id, client_secret) = setup_user(&app).await;
 
     // Step 1: Authorize — get authorization code
     let req = Request::builder()
@@ -144,6 +148,7 @@ async fn full_oauth2_authorization_code_flow() {
         .header("Content-Type", "application/json")
         .body(Body::from(json!({
             "email": &email,
+            "tenant_id": &tenant_id,
             "password": "oauth-password-123",
             "client_id": &client_id,
             "redirect_uri": "https://example.com/cb"
@@ -163,7 +168,8 @@ async fn full_oauth2_authorization_code_flow() {
         .body(Body::from(json!({
             "grant_type": "authorization_code",
             "code": code,
-            "client_id": client_id
+            "client_id": client_id,
+            "client_secret": client_secret
         }).to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -179,14 +185,14 @@ async fn full_oauth2_authorization_code_flow() {
 #[tokio::test]
 async fn authorization_code_is_one_time_use() {
     let (app, _) = common::build_app().await.unwrap();
-    let (_, email, client_id) = setup_user(&app).await;
+    let (tenant_id, email, client_id, client_secret) = setup_user(&app).await;
 
     // Get code
     let req = Request::builder()
         .uri("/authorize").method("POST")
         .header("Content-Type", "application/json")
         .body(Body::from(json!({
-            "email": &email, "password": "oauth-password-123",
+            "email": &email, "tenant_id": &tenant_id, "password": "oauth-password-123",
             "client_id": &client_id, "redirect_uri": "https://example.com/cb"
         }).to_string()))
         .unwrap();
@@ -197,7 +203,7 @@ async fn authorization_code_is_one_time_use() {
     // First exchange — succeeds
     let req = Request::builder().uri("/oauth/token").method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id}).to_string()))
+        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id,"client_secret":&client_secret}).to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -205,7 +211,7 @@ async fn authorization_code_is_one_time_use() {
     // Second exchange — must fail
     let req = Request::builder().uri("/oauth/token").method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id}).to_string()))
+        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id,"client_secret":&client_secret}).to_string()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);

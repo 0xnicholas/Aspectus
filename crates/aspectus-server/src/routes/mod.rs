@@ -1,4 +1,5 @@
 pub mod api_keys;
+pub mod audit_logs;
 pub mod auth;
 pub mod health;
 pub mod introspect;
@@ -9,3 +10,4 @@ pub mod users;
 pub mod metrics;
 pub mod oauth;
 pub mod roles;
+pub mod service_tokens;

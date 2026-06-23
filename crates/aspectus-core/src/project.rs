@@ -5,8 +5,13 @@ use crate::error::CoreError;
 
 /// Ecosystem projects known to Aspectus.
 ///
-/// Each project has exactly one Service Token for calling `/introspect`.
+/// Each consumer project has exactly one Service Token for calling `/introspect`.
 /// New projects require a code change (ADR-010).
+///
+/// `Aspectus` is a special internal project used for the admin service token
+/// that is allowed to call management endpoints (`/tenants`, `/users`, etc.).
+/// It is NOT a consumer project and must never be used as an API Key `project`
+/// or OAuth2 `client_id`.
 ///
 /// History:
 /// - 2026-06-21: Tavern removed. Tavern code has been merged into Pandaria
@@ -24,6 +29,9 @@ pub enum Project {
     Constell,
     Tokencamp,
     Heirloom,
+    /// Internal admin project. Management API requires a service token
+    /// registered under this project.
+    Aspectus,
 }
 
 impl std::fmt::Display for Project {
@@ -34,6 +42,7 @@ impl std::fmt::Display for Project {
             Self::Constell => "constell",
             Self::Tokencamp => "tokencamp",
             Self::Heirloom => "heirloom",
+            Self::Aspectus => "aspectus",
         };
         write!(f, "{s}")
     }
@@ -49,6 +58,7 @@ impl std::str::FromStr for Project {
             "constell" => Ok(Self::Constell),
             "tokencamp" => Ok(Self::Tokencamp),
             "heirloom" => Ok(Self::Heirloom),
+            "aspectus" => Ok(Self::Aspectus),
             other => Err(CoreError::InvalidProject(other.to_owned())),
         }
     }

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
 use aspectus_core::error::CoreError;
@@ -147,13 +148,15 @@ impl OAuth2ClientStore for PgOAuth2ClientStore {
         client_id: &str,
         name: &str,
         redirect_uris: &[String],
+        client_secret_hash: &str,
     ) -> Result<(), CoreError> {
         sqlx::query(
-            "INSERT INTO oauth2_clients (client_id, name, redirect_uris) VALUES ($1, $2, $3)",
+            "INSERT INTO oauth2_clients (client_id, name, redirect_uris, client_secret_hash) VALUES ($1, $2, $3, $4)",
         )
         .bind(client_id)
         .bind(name)
         .bind(redirect_uris)
+        .bind(client_secret_hash)
         .execute(&self.pool)
         .await
         .map_err(|e| CoreError::Internal(e.to_string()))?;
@@ -183,5 +186,28 @@ impl OAuth2ClientStore for PgOAuth2ClientStore {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| CoreError::Internal(e.to_string()))
+    }
+
+    async fn validate_client_secret(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Result<bool, CoreError> {
+        let row: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT client_secret_hash FROM oauth2_clients WHERE client_id = $1",
+        )
+        .bind(client_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+
+        match row {
+            None => Ok(false), // unknown client
+            Some(None) => Ok(true), // no secret configured — backward compat
+            Some(Some(stored_hash)) => {
+                let provided_hash = hex::encode(Sha256::digest(client_secret.as_bytes()));
+                Ok(stored_hash == provided_hash)
+            }
+        }
     }
 }

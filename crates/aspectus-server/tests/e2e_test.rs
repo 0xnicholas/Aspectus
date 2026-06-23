@@ -25,11 +25,11 @@ async fn admin_creates_api_key_and_introspects() {
     let sa = ss.create(&tenant.id, "e2e-sa", None).await.unwrap();
 
     let mut raw = [0u8; 32]; getrandom::getrandom(&mut raw).unwrap();
-    let hash = hex::encode(Sha256::digest(&raw));
+    let hash = hex::encode(Sha256::digest(raw));
     let kid = unique_id("pk");
     sqlx::query("INSERT INTO api_keys (id, tenant_id, service_account_id, project, key_hash, key_prefix, scopes) VALUES ($1,$2,$3,$4,$5,$6,$7)")
         .bind(&kid).bind(&tenant.id).bind(&sa.id).bind(aspectus_core::project::Project::Pandaria)
-        .bind(&hash).bind("pk_live_00000000").bind(&vec!["pandaria:session:create"])
+        .bind(&hash).bind("pk_live_00000000").bind(vec!["pandaria:session:create"])
         .execute(&p).await.unwrap();
 
     let (_, revoked) = sqlx::query_as::<_, (String, bool)>("SELECT id, revoked_at IS NOT NULL FROM api_keys WHERE key_hash = $1")
@@ -64,7 +64,7 @@ async fn user_role_scope_and_oauth2() {
     assert!(PasswordHasher::verify("e2epass", &pw).unwrap());
 
     let mut raw = [0u8; 32]; getrandom::getrandom(&mut raw).unwrap();
-    let code = hex::encode(Sha256::digest(&raw));
+    let code = hex::encode(Sha256::digest(raw));
     sqlx::query("INSERT INTO authorization_codes (code, user_id, client_id, redirect_uri, expires_at) VALUES ($1,$2,$3,$4,$5)")
         .bind(&code).bind(&user.id).bind("pandaria").bind("https://cb.example.com")
         .bind(chrono::Utc::now() + chrono::Duration::seconds(60)).execute(&p).await.unwrap();
@@ -88,7 +88,7 @@ async fn refresh_token_rotation() {
     let user = us.create(&tenant.id, &format!("rt-{}@t.com", unique_id("r")), &PasswordHasher::hash("x").unwrap(), None).await.unwrap();
 
     let mut raw = [0u8; 32]; getrandom::getrandom(&mut raw).unwrap();
-    let token = format!("rt_{}", hex::encode(&raw));
+    let token = format!("rt_{}", hex::encode(raw));
     let thash = hex::encode(Sha256::digest(token.as_bytes()));
     sqlx::query("INSERT INTO refresh_tokens (token_hash, user_id, client_id, expires_at) VALUES ($1,$2,$3,$4)")
         .bind(&thash).bind(&user.id).bind("pandaria").bind(chrono::Utc::now() + chrono::Duration::days(30)).execute(&p).await.unwrap();

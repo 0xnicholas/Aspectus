@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod db;
+pub mod email;
 pub mod scope_expander;
 pub mod error;
 pub mod middleware;
@@ -18,7 +19,7 @@ use std::sync::Arc;
 
 use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, RedisCache, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
-use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgTenantStore, PgUserStore,
+use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
     PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore};
 
 /// Shared application state passed to all handlers via axum `State`.
@@ -28,6 +29,7 @@ pub struct AppState {
     pub service_account_store: Arc<PgServiceAccountStore>,
     pub api_key_store: Arc<PgApiKeyStore>,
     pub audit_log_store: Arc<PgAuditLogStore>,
+    pub service_token_store: Arc<PgServiceTokenStore>,
     pub api_key_creator: Arc<ApiKeyCreator>,
     pub api_key_verifier: Arc<ApiKeyVerifier>,
     pub token_verifier: Arc<TokenVerifier>,
@@ -40,5 +42,6 @@ pub struct AppState {
     pub oauth_client_store: Arc<PgOAuth2ClientStore>,
     /// Redis cache for scope expansion (TTL=60s).
     pub scope_cache: Arc<RedisCache>,
+    pub email_sender: Arc<dyn email::EmailSender>,
     pub pool: sqlx::PgPool,
 }

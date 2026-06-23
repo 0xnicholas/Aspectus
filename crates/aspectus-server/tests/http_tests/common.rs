@@ -20,10 +20,12 @@ use aspectus_server::db::{
     PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
     PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore,
 };
-use aspectus_server::middleware::auth::service_token_auth;
+use aspectus_server::email::LoggingEmailSender;
+use aspectus_server::middleware::auth::{require_admin_service_token, service_token_auth};
 use aspectus_server::AppState;
 
 const SERVICE_TOKEN: &str = "aspectus-dev-pandaria-service-token";
+const ADMIN_SERVICE_TOKEN: &str = "aspectus-dev-admin-service-token";
 
 pub async fn build_app() -> anyhow::Result<(Router, String)> { build_app_with().await.map(|t| (t.router, t.token_hash)) }
 
@@ -35,8 +37,6 @@ pub struct TestApp {
     pub token_hash: String,
     pub jwt_signer: Arc<aspectus_auth::jwt::JwtSigner>,
     pub api_key_creator: Arc<aspectus_auth::ApiKeyCreator>,
-    pub tenant_store: Arc<aspectus_server::db::PgTenantStore>,
-    pub service_account_store: Arc<aspectus_server::db::PgServiceAccountStore>,
 }
 
 pub async fn build_app_with() -> anyhow::Result<TestApp> {
@@ -63,6 +63,15 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
     .execute(&pool)
     .await;
 
+    // Seed internal admin service token for management endpoints.
+    let admin_token_hash = hex::encode(Sha256::digest(ADMIN_SERVICE_TOKEN.as_bytes()));
+    let _ = sqlx::query(
+        "INSERT INTO service_tokens (project, token_hash) VALUES ('aspectus', $1) ON CONFLICT (project) DO NOTHING",
+    )
+    .bind(&admin_token_hash)
+    .execute(&pool)
+    .await;
+
     let redis_client = redis::Client::open(redis_url.as_str())?;
     let auth_cache = RedisCache::new(redis_client.clone()).await?;
     let jwt_cache = RedisCache::new(redis_client.clone()).await?;
@@ -73,8 +82,10 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
     let api_key_creator = Arc::new(ApiKeyCreator::new(api_key_store.clone()));
     let api_key_creator_for_test = api_key_creator.clone();
 
+    let service_token_store = Arc::new(PgServiceTokenStore::new(pool.clone()));
+
     let svc_verifier = Arc::new(ServiceTokenVerifier::new(
-        Arc::new(PgServiceTokenStore::new(pool.clone())),
+        service_token_store.clone(),
         svc_token_cache,
     ));
 
@@ -89,11 +100,13 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
         service_account_store: Arc::new(PgServiceAccountStore::new(pool.clone())),
         api_key_store: api_key_store.clone(),
         audit_log_store: Arc::new(PgAuditLogStore::new(pool.clone())),
+        service_token_store: service_token_store.clone(),
         user_store: Arc::new(PgUserStore::new(pool.clone())),
         auth_code_store: Arc::new(PgAuthorizationCodeStore::new(pool.clone())),
         refresh_token_store: Arc::new(PgRefreshTokenStore::new(pool.clone())),
         oauth_client_store: Arc::new(PgOAuth2ClientStore::new(pool.clone())),
         scope_cache,
+        email_sender: Arc::new(LoggingEmailSender),
         api_key_creator,
         api_key_verifier: api_key_verifier.clone(),
         token_verifier: Arc::new(TokenVerifier::new(api_key_verifier.clone(), jwt_verifier.clone())),
@@ -127,6 +140,11 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
         .route("/api-keys/{id}", get(aspectus_server::routes::api_keys::get))
         .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
         .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))
+        .route("/service-tokens", post(aspectus_server::routes::service_tokens::create).get(aspectus_server::routes::service_tokens::list))
+        .route("/service-tokens/{project}", get(aspectus_server::routes::service_tokens::get).delete(aspectus_server::routes::service_tokens::revoke))
+        .route("/service-tokens/{project}/rotate", post(aspectus_server::routes::service_tokens::rotate))
+        .route("/audit-logs", get(aspectus_server::routes::audit_logs::list))
+        .layer(middleware::from_fn(require_admin_service_token))
         .layer(auth_layer.clone())
         .with_state(state.clone());
 
@@ -138,6 +156,8 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
         .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
         .route("/authorize", post(aspectus_server::routes::oauth::authorize))
         .route("/oauth/token", post(aspectus_server::routes::oauth::token))
+        .route("/login", post(aspectus_server::routes::auth::login))
+        .route("/login/lookup", post(aspectus_server::routes::auth::login_lookup))
         .with_state(state.clone())
         .merge(mgmt)
         .layer(CorsLayer::permissive())
@@ -149,11 +169,13 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
         token_hash,
         jwt_signer: jwt_signer_for_test,
         api_key_creator: api_key_creator_for_test,
-        tenant_store: state.tenant_store.clone(),
-        service_account_store: state.service_account_store.clone(),
     })
 }
 
 pub fn service_token_header() -> String {
     format!("Bearer {SERVICE_TOKEN}")
+}
+
+pub fn admin_service_token_header() -> String {
+    format!("Bearer {ADMIN_SERVICE_TOKEN}")
 }

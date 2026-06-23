@@ -20,6 +20,9 @@ use crate::AppState;
 pub struct AuthorizeRequest {
     email: String,
     password: String,
+    /// ADR-016: tenant_id is REQUIRED to disambiguate when the same email
+    /// is registered under multiple tenants (schema UNIQUE (tenant_id, email)).
+    tenant_id: String,
     client_id: String,
     redirect_uri: String,
     #[serde(default)]
@@ -59,9 +62,12 @@ pub async fn authorize(
         ).into_response();
     }
 
+    // ADR-016: look up user by (tenant_id, email) to prevent cross-tenant
+    // email collisions. The same email can exist in multiple tenants.
     let (user_id, _tenant_id) = match sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, tenant_id, password_hash FROM users WHERE email = $1",
+        "SELECT id, tenant_id, password_hash FROM users WHERE tenant_id = $1 AND email = $2",
     )
+    .bind(&req.tenant_id)
     .bind(&req.email)
     .fetch_optional(&state.pool)
     .await
@@ -74,7 +80,7 @@ pub async fn authorize(
         }
         Ok(None) => return ProblemDetails::unauthorized("Invalid credentials", "/authorize").into_response(),
         Err(e) => {
-            tracing::error!(error = %e, email = %req.email, "User lookup failed");
+            tracing::error!(error = %e, tenant_id = %req.tenant_id, email_hash = %hex::encode(Sha256::digest(req.email.as_bytes())), "User lookup failed");
             return ProblemDetails::internal_error("Authentication service temporarily unavailable").into_response();
         }
     };
@@ -114,8 +120,9 @@ pub struct TokenRequest {
     #[serde(default)]
     code_verifier: Option<String>,
     #[serde(default)]
-    #[allow(dead_code)]
     client_id: Option<String>,
+    #[serde(default)]
+    client_secret: Option<String>,
     #[serde(default)]
     refresh_token: Option<String>,
 }
@@ -131,6 +138,21 @@ pub async fn token(
                 None => return ProblemDetails::validation_failed("code required", vec![]).into_response(),
             };
 
+            let request_client_id = match &req.client_id {
+                Some(id) => id.as_str(),
+                None => return ProblemDetails::validation_failed("client_id required", vec![]).into_response(),
+            };
+            let client_secret = req.client_secret.as_deref().unwrap_or("");
+
+            match state.oauth_client_store.validate_client_secret(request_client_id, client_secret).await {
+                Ok(true) => {}
+                Ok(false) => return ProblemDetails::unauthorized("Invalid client_id or client_secret", "/token").into_response(),
+                Err(e) => {
+                    tracing::error!(error = %e, "Client secret validation failed");
+                    return ProblemDetails::internal_error("Token service temporarily unavailable").into_response();
+                }
+            }
+
             let row = match state.auth_code_store.exchange_code(&code).await {
                 Ok(Some(r)) => r,
                 Ok(None) => return ProblemDetails::unauthorized("Invalid or expired code", "/token").into_response(),
@@ -140,6 +162,10 @@ pub async fn token(
                 }
             };
             let (user_id, client_id, _redirect_uri) = row;
+
+            if client_id != request_client_id {
+                return ProblemDetails::unauthorized("Invalid client_id", "/token").into_response();
+            }
 
             // PKCE: verify code_verifier if code_challenge was stored
             if let Some(ref verifier) = req.code_verifier {
@@ -182,10 +208,29 @@ pub async fn token(
                 Some(t) => t.clone(),
                 None => return ProblemDetails::validation_failed("refresh_token required", vec![]).into_response(),
             };
+
+            let request_client_id = match &req.client_id {
+                Some(id) => id.as_str(),
+                None => return ProblemDetails::validation_failed("client_id required", vec![]).into_response(),
+            };
+            let client_secret = req.client_secret.as_deref().unwrap_or("");
+
+            match state.oauth_client_store.validate_client_secret(request_client_id, client_secret).await {
+                Ok(true) => {}
+                Ok(false) => return ProblemDetails::unauthorized("Invalid client_id or client_secret", "/token").into_response(),
+                Err(e) => {
+                    tracing::error!(error = %e, "Client secret validation failed");
+                    return ProblemDetails::internal_error("Token service temporarily unavailable").into_response();
+                }
+            }
+
             let hash = hex::encode(Sha256::digest(token.as_bytes()));
 
             match state.refresh_token_store.rotate(&hash).await {
                 Ok(Some((user_id, client_id, _))) => {
+                    if client_id != request_client_id {
+                        return ProblemDetails::unauthorized("Invalid client_id", "/token").into_response();
+                    }
                     let tenant_id = match sqlx::query_as::<_, (String,)>(
                         "SELECT tenant_id FROM users WHERE id = $1",
                     )
@@ -345,11 +390,25 @@ pub async fn create_client(
 ) -> impl IntoResponse {
     let id = format!("client_{}", generate_id());
 
+    // Generate a client_secret and store only its SHA-256 hash.
+    // The plain-text secret is returned exactly once.
+    let mut raw = [0u8; 32];
+    if let Err(e) = getrandom::getrandom(&mut raw) {
+        tracing::error!(error = %e, "Failed to generate client_secret");
+        return ProblemDetails::internal_error("Failed to create client").into_response();
+    }
+    let secret = hex::encode(raw);
+    let secret_hash = hex::encode(Sha256::digest(secret.as_bytes()));
+
     match state.oauth_client_store
-        .create(&id, &req.name, &req.redirect_uris)
+        .create(&id, &req.name, &req.redirect_uris, &secret_hash)
         .await
     {
-        Ok(()) => (StatusCode::CREATED, Json(json!({"client_id": id, "name": req.name}))).into_response(),
+        Ok(()) => (StatusCode::CREATED, Json(json!({
+            "client_id": id,
+            "name": req.name,
+            "client_secret": secret,
+        }))).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to create OAuth2 client");
             ProblemDetails::internal_error("Failed to create client").into_response()

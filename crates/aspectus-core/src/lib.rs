@@ -14,6 +14,7 @@ pub mod project;
 pub mod role;
 pub mod scope;
 pub mod service_account;
+pub mod service_token;
 pub mod store;
 pub mod tenant;
 pub mod user;

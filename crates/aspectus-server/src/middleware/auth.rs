@@ -6,6 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use aspectus_auth::ServiceTokenVerifier;
+use aspectus_core::project::Project;
 
 use crate::error::ProblemDetails;
 
@@ -55,5 +56,28 @@ pub async fn service_token_auth(
             )
                 .into_response()
         }
+    }
+}
+
+/// Middleware that requires the authenticated Service Token to belong to the
+/// internal `aspectus` admin project.
+///
+/// Must run AFTER [`service_token_auth`] so that the `Project` extension is
+/// present. This prevents consumer project tokens (pandaria, constell, etc.)
+/// from calling management endpoints.
+pub async fn require_admin_service_token(
+    request: Request,
+    next: Next,
+) -> Response {
+    match request.extensions().get::<Project>() {
+        Some(Project::Aspectus) => next.run(request).await,
+        Some(_) => ProblemDetails::forbidden("Management endpoints require an admin service token")
+            .into_response(),
+        None => ProblemDetails::with_code_instance(
+            aspectus_core::ErrorCode::InvalidServiceToken,
+            "Missing service token context",
+            request.uri().path(),
+        )
+        .into_response(),
     }
 }

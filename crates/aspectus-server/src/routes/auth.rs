@@ -443,9 +443,12 @@ pub async fn logout(
 
 // ── POST /forgot-password ──────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ForgotPasswordRequest {
     email: String,
+    /// ADR-016: tenant_id is REQUIRED to disambiguate when the same email
+    /// is registered under multiple tenants (schema UNIQUE (tenant_id, email)).
+    tenant_id: String,
 }
 
 /// POST /forgot-password
@@ -458,10 +461,12 @@ pub async fn forgot_password(
     State(state): State<AppState>,
     Json(req): Json<ForgotPasswordRequest>,
 ) -> impl IntoResponse {
-    // Look up user (but don't reveal existence)
+    // ADR-016: look up user by (tenant_id, email) to prevent cross-tenant
+    // email collisions. The same email can exist in multiple tenants.
     let user = match sqlx::query_as::<_, (String, String)>(
-        "SELECT id, tenant_id FROM users WHERE email = $1",
+        "SELECT id, tenant_id FROM users WHERE tenant_id = $1 AND email = $2",
     )
+    .bind(&req.tenant_id)
     .bind(&req.email)
     .fetch_optional(&state.pool)
     .await
@@ -473,7 +478,7 @@ pub async fn forgot_password(
         }
     };
 
-    let (user_id, _tenant_id) = user;
+    let (user_id, tenant_id) = user;
 
     // Generate reset token
     let mut raw = [0u8; 32];
@@ -496,15 +501,26 @@ pub async fn forgot_password(
         return ProblemDetails::internal_error("Failed to process request").into_response();
     }
 
-    // In production, send email. For now, log the reset link.
+    // Send the reset email. The URL contains a one-time token; never expose
+    // it in error responses. Delivery failures are logged but still return a
+    // generic success message to prevent enumeration.
     let reset_url = format!(
         "https://aspectus.local/reset-password?token={token}"
     );
-    tracing::info!(
-        user_id = %user_id,
-        reset_url = %reset_url,
-        "Password reset token generated (email stub)"
-    );
+    if let Err(e) = state.email_sender.send_password_reset(&req.email, &reset_url).await {
+        tracing::error!(
+            user_id = %user_id,
+            tenant_id = %tenant_id,
+            error = %e,
+            "Failed to send password reset email"
+        );
+    } else {
+        tracing::info!(
+            user_id = %user_id,
+            tenant_id = %tenant_id,
+            "Password reset email sent"
+        );
+    }
 
     // Always return the same message
     (StatusCode::OK, Json(json!({"message": "If this email is registered, a reset link has been sent."}))).into_response()
@@ -841,9 +857,24 @@ mod tests {
 
     #[test]
     fn forgot_password_request() {
-        let json = r#"{"email":"a@b.com"}"#;
+        let json = r#"{"email":"a@b.com","tenant_id":"org_acme"}"#;
         let req: ForgotPasswordRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.email, "a@b.com");
+        assert_eq!(req.tenant_id, "org_acme");
+    }
+
+    #[test]
+    fn forgot_password_request_requires_tenant_id() {
+        // ADR-016: tenant_id is REQUIRED — without it, the lookup is ambiguous
+        // for users registered under multiple tenants.
+        let json = r#"{"email":"a@b.com"}"#;
+        let result: Result<ForgotPasswordRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "Forgot password without tenant_id must fail to deserialize");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("tenant_id") || err.contains("missing field"),
+            "Error should mention tenant_id, got: {err}"
+        );
     }
 
     // ── LoginLookupRequest (ADR-016) ──

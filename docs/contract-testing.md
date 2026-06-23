@@ -199,9 +199,9 @@ thread 'introspect_active_api_key_contract' panicked at 'snapshot assertion fail
 - [x] **JSON Schema 验证** — 已完成（v0.9.1+）。详见下文 §Schema 验证（`jsonschema`）。
 - [x] **JWT 完整覆盖** — 已完成（v0.9.1+）：`introspect_active_jwt_contract` + `introspect_expired_jwt_contract`
 - [x] **Opaque token 覆盖** — 已完成（v0.9.1+）：`introspect_active_opaque_contract`
-- [ ] **Performance contract** — 加一个 benchmark 验证 p95 < 5ms（ADR-001 承诺）
-- [ ] **JWKS schema 验证** — `/.well-known/jwks.json` 也应该有契约测试
-- [ ] **Multi-tenant 隔离验证** — 验证 token A 不能看到 tenant B 的任何信息（即使 active=true）
+- [x] **Performance contract** — 已完成（v0.9.2+）：`benches/introspect.rs`（Criterion，测量 API key cold/hot 与 JWT 路径）
+- [x] **JWKS schema 验证** — 已完成（v0.9.2+）：`jwks_endpoint_contract`
+- [x] **Multi-tenant 隔离验证** — 已完成（v0.9.2+）：`cross_tenant_login_isolation_contract`
 
 ## Schema 验证（`jsonschema`）
 

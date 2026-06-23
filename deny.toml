@@ -1,0 +1,60 @@
+# cargo-deny configuration for Aspectus.
+# Run locally: cargo deny check
+
+[graph]
+all-features = false
+no-default-features = false
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+ignore = []
+
+[licenses]
+# Allow common permissive licenses used by the Rust ecosystem.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+# Explicitly deny strong copyleft licenses.
+deny = [
+    "GPL-2.0",
+    "GPL-2.0-only",
+    "GPL-2.0-or-later",
+    "GPL-3.0",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "AGPL-3.0",
+]
+copyleft = "warn"
+default = "deny"
+unlicensed = "deny"
+
+# `ring` uses a custom license file that cargo-deny cannot automatically classify.
+[[licenses.clarify]]
+name = "ring"
+version = "*"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+# Warn when multiple versions of the same crate are pulled in.
+multiple-versions = "warn"
+# Workspace manifests use wildcard version requirements for shared crates.
+wildcards = "allow"
+highlight = "all"
+# Never allow crates with security advisories.
+deny = []
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+# Only crates.io is permitted.
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

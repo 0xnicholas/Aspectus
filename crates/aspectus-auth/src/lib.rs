@@ -175,6 +175,40 @@ impl ApiKeyVerifier {
     }
 }
 
+// ---- ServiceTokenCreator ----
+
+/// Plain-text result of creating/rotating a service token.
+/// The full `token` is returned exactly once to the caller.
+#[derive(Debug, Clone)]
+pub struct CreatedServiceToken {
+    pub project: Project,
+    pub token: String,
+    pub token_prefix: String,
+    pub token_hash: String,
+}
+
+/// Generates cryptographically random service tokens.
+///
+/// Format: `st_<64 hex chars>` (32 random bytes). The database only stores
+/// the SHA-256 hash; the plain text is never persisted.
+pub struct ServiceTokenCreator;
+
+impl ServiceTokenCreator {
+    pub fn create(project: Project) -> Result<CreatedServiceToken, CoreError> {
+        let mut raw = [0u8; 32];
+        getrandom::getrandom(&mut raw).map_err(|e| CoreError::Internal(format!("RNG: {e}")))?;
+        let token = format!("st_{}", hex::encode(raw));
+        let token_hash = sha256_hex(token.as_bytes());
+        let token_prefix = token.chars().take(12).collect();
+        Ok(CreatedServiceToken {
+            project,
+            token,
+            token_prefix,
+            token_hash,
+        })
+    }
+}
+
 // ---- ServiceTokenVerifier ----
 
 pub struct ServiceTokenVerifier {
@@ -201,6 +235,13 @@ impl ServiceTokenVerifier {
             _ => None,
         }
     }
+
+    /// Invalidate the cached entry for a given token hash.
+    /// Called immediately after rotation or revocation so the old token stops
+    /// authenticating without waiting for the 60-second TTL.
+    pub async fn invalidate_by_hash(&self, token_hash: &str) {
+        self.cache.del(&format!("svc_token:{token_hash}")).await;
+    }
 }
 
 // ---- Tests ----
@@ -212,7 +253,7 @@ mod tests {
     #[test]
     fn extract_raw_from_valid_key() {
         let raw = [0xabu8; 32];
-        let key = format!("pk_live_{}", hex::encode(&raw));
+        let key = format!("pk_live_{}", hex::encode(raw));
         let extracted = extract_raw_from_key(&key).unwrap();
         assert_eq!(extracted, raw.to_vec());
     }
@@ -220,7 +261,7 @@ mod tests {
     #[test]
     fn extract_raw_from_opaque_key() {
         let raw = [0xabu8; 32];
-        let key = format!("ot_{}", hex::encode(&raw));
+        let key = format!("ot_{}", hex::encode(raw));
         let extracted = extract_raw_from_key(&key).unwrap();
         assert_eq!(extracted, raw.to_vec());
     }
@@ -247,7 +288,7 @@ mod tests {
     fn compute_cache_ttl_with_expiry() {
         let future = Utc::now() + chrono::Duration::seconds(1000);
         let ttl = compute_cache_ttl(Some(future));
-        assert!(ttl >= 99 && ttl <= 100, "expected ~100, got {ttl}");
+        assert!((99..=100).contains(&ttl), "expected ~100, got {ttl}");
     }
 
     #[test]

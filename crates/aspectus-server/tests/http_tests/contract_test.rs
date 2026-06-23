@@ -77,7 +77,7 @@ async fn create_tenant(app: &axum::Router, name: &str) -> String {
     let req = Request::builder()
         .uri("/tenants").method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({ "name": name }).to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -91,7 +91,7 @@ async fn create_service_account(app: &axum::Router, tenant_id: &str, label: &str
     let req = Request::builder()
         .uri("/service-accounts").method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({
             "tenant_id": tenant_id,
             "label": label,
@@ -113,7 +113,7 @@ async fn create_api_key(
     let req = Request::builder()
         .uri("/api-keys").method("POST")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({
             "service_account_id": service_account_id,
             "project": project,
@@ -133,7 +133,7 @@ async fn revoke_api_key(app: &axum::Router, key_id: &str) {
     let req = Request::builder()
         .uri(format!("/api-keys/{key_id}"))
         .method("DELETE")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::empty())
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -145,7 +145,7 @@ async fn set_tenant_quotas(app: &axum::Router, tenant_id: &str, quotas: Value) {
         .uri(format!("/tenants/{tenant_id}/quotas"))
         .method("PUT")
         .header("Content-Type", "application/json")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(quotas.to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -156,7 +156,7 @@ async fn post_introspect(app: &axum::Router, token: &str) -> (StatusCode, Value,
     let req = Request::builder()
         .uri("/introspect").method("POST")
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Authorization", &common::service_token_header())
+        .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(format!("token={token}")))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
@@ -578,7 +578,7 @@ fn schema_accepts_valid_active_response() {
 
 #[tokio::test]
 async fn introspect_active_jwt_contract() {
-    use aspectus_auth::jwt::JwtSigner;
+    
     use aspectus_core::identity::IdentityType;
     use aspectus_core::project::Project;
 
@@ -693,7 +693,7 @@ async fn introspect_active_opaque_contract() {
 
 #[tokio::test]
 async fn introspect_expired_jwt_contract() {
-    use aspectus_core::identity::IdentityType;
+    
     use aspectus_core::project::Project;
     use jsonwebtoken::{encode, EncodingKey, Header};
     use sha2::Digest as _;
@@ -741,3 +741,155 @@ async fn introspect_expired_jwt_contract() {
     insta::assert_json_snapshot!("introspect_expired_jwt", body);
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Contract Test 9: JWKS endpoint shape
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Consumers (Pandaria, Constell, etc.) fetch /.well-known/jwks.json to verify
+// JWTs locally. The shape must be a standard JWK set.
+
+#[tokio::test]
+async fn jwks_endpoint_contract() {
+    let app = common::build_app_with().await.unwrap();
+    let req = Request::builder()
+        .uri("/.well-known/jwks.json")
+        .method("GET")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.router.oneshot(req).await.unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(content_type.starts_with("application/json"));
+
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let jwks: Value = serde_json::from_slice(&body).unwrap();
+    assert!(jwks.get("keys").is_some(), "JWKS must contain a 'keys' array");
+    let keys = jwks["keys"].as_array().expect("keys must be an array");
+    assert!(!keys.is_empty(), "JWKS must contain at least one key");
+
+    for key in keys {
+        assert_eq!(key["kty"], "RSA", "JWK key type must be RSA");
+        assert!(key["n"].is_string(), "JWK must contain modulus 'n'");
+        assert!(key["e"].is_string(), "JWK must contain exponent 'e'");
+        assert_eq!(key["alg"], "RS256", "JWK algorithm must be RS256");
+        assert_eq!(key["use"], "sig", "JWK use must be 'sig'");
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Contract Test 10: Cross-tenant login isolation
+// ────────────────────────────────────────────────────────────────────────────
+//
+// The same email can exist in multiple tenants. /login/lookup must return all
+// matching tenants, and /login + /authorize must only succeed when the caller
+// supplies the correct tenant_id.
+
+async fn create_user(app: &axum::Router, tenant_id: &str, email: &str, password: &str) -> String {
+    let req = Request::builder()
+        .uri("/users")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .header("Authorization", &common::admin_service_token_header())
+        .body(Body::from(json!({
+            "tenant_id": tenant_id,
+            "email": email,
+            "password": password,
+        }).to_string()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "create_user failed");
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let user: Value = serde_json::from_slice(&body).unwrap();
+    user["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn cross_tenant_login_isolation_contract() {
+    let app = common::build_app_with().await.unwrap();
+    let tenant_a = create_tenant(&app.router, "contract-isolation-a").await;
+    let tenant_b = create_tenant(&app.router, "contract-isolation-b").await;
+
+    let email = format!("isolation-{}@test.com", chrono::Utc::now().timestamp_millis());
+    let password = "isolation-pass-123";
+
+    let user_a = create_user(&app.router, &tenant_a, &email, password).await;
+    let user_b = create_user(&app.router, &tenant_b, &email, password).await;
+    assert_ne!(user_a, user_b, "Users in different tenants must have distinct ids");
+
+    // Step 1: /login/lookup returns both tenants for the same email.
+    let req = Request::builder()
+        .uri("/login/lookup")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(json!({"email": email}).to_string()))
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let lookup: Value = serde_json::from_slice(&body).unwrap();
+    let tenant_ids: Vec<&str> = lookup["tenants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["tenant_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(tenant_ids.len(), 2, "lookup must return both tenants");
+    assert!(tenant_ids.contains(&tenant_a.as_str()));
+    assert!(tenant_ids.contains(&tenant_b.as_str()));
+
+    // Step 2: /login with tenant_a returns a token scoped to tenant_a.
+    let req = Request::builder()
+        .uri("/login")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(json!({
+            "email": email,
+            "password": password,
+            "tenant_id": tenant_a,
+        }).to_string()))
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let login: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(login["tenant"]["id"], tenant_a);
+
+    // Step 3: /authorize with tenant_b works, but with a non-existent tenant fails.
+    // First create an OAuth2 client in tenant_b via the management API.
+    let req = Request::builder()
+        .uri("/clients")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .header("Authorization", &common::admin_service_token_header())
+        .body(Body::from(json!({
+            "name": "isolation-client",
+            "redirect_uris": ["https://example.com/cb"],
+        }).to_string()))
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let client: Value = serde_json::from_slice(&body).unwrap();
+    let client_id = client["client_id"].as_str().unwrap();
+
+    // Wrong tenant → 401 (ambiguous or missing user)
+    let req = Request::builder()
+        .uri("/authorize")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(json!({
+            "email": email,
+            "password": password,
+            "tenant_id": "nonexistent-tenant",
+            "client_id": client_id,
+            "redirect_uri": "https://example.com/cb",
+        }).to_string()))
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}

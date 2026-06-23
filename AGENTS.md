@@ -177,6 +177,12 @@ POST /introspect
 | `POST /api-keys` | 创建 API Key |
 | `GET /api-keys` | 列出租户的所有 API Key |
 | `DELETE /api-keys/{id}` | 吊销 API Key |
+| `GET /service-tokens` | 列出所有项目 Service Token 元数据 |
+| `POST /service-tokens` | 为消费项目创建 Service Token |
+| `GET /service-tokens/{project}` | 查看指定项目 Service Token 元数据 |
+| `POST /service-tokens/{project}/rotate` | 轮换指定项目 Service Token |
+| `DELETE /service-tokens/{project}` | 吊销指定项目 Service Token |
+| `GET /audit-logs` | 查询审计日志（按租户/动作/目标/时间范围过滤） |
 | `POST /users` | 创建用户（含角色分配） |
 | `GET /users/{id}/scopes` | 查询用户有效 scope |
 
@@ -218,7 +224,7 @@ User
 APIKey
   ├── id: string (PK)
   ├── tenant_id: string (FK → Tenant)
-  ├── project: string          // "pandaria" | "tavern" | "constell" | ...
+  ├── project: string          // "pandaria" | "constell" | "tokencamp" | "heirloom" | "emerald"
   ├── key_hash: string         // sha256(key)
   ├── key_prefix: string       // "pk_live_abc123" → prefix for UI display
   ├── scopes: string[]
@@ -279,28 +285,28 @@ Aspectus/
 
 **目标**：Token 自省端点可用，Pandaria 可以调它验证 token。
 
-- [ ] Tenant CRUD（API only，无 UI）
-- [ ] API Key 创建与吊销
-- [ ] `POST /introspect` 端点（RFC 7662 子集）
-- [ ] 自省结果 Redis 缓存
-- [ ] 审计日志
-- [ ] Pandaria api-gateway 接入
+- [x] Tenant CRUD（API + React 管理控制台）
+- [x] API Key 创建与吊销
+- [x] `POST /introspect` 端点（RFC 7662 子集）
+- [x] 自省结果 Redis 缓存
+- [x] 审计日志
+- [ ] Pandaria api-gateway 接入（在 Pandaria 侧跟踪，不在本仓库）
 
 **验收**：Pandaria 不再使用 HMAC token，改为调 Aspectus `/introspect` 验证 Bearer token。
 
 ### Phase 2 — 多项目接入 + 配额
 
-- [ ] 多 project scope 支持
-- [ ] 租户配额配置 API
-- [ ] Constell、Tokencamp 接入
-- [ ] API Key 管理 UI（可以是 Daypaw 中的应用）
+- [x] 多 project scope 支持
+- [x] 租户配额配置 API
+- [ ] Constell、Tokencamp 接入（在对应项目侧跟踪，不在本仓库）
+- [x] API Key 管理 UI（已内置于 Aspectus 管理控制台）
 
 ### Phase 3 — 用户 + OAuth2
 
-- [ ] User 模型 + 密码认证
-- [ ] OAuth2 Authorization Code flow
-- [ ] Role 管理
-- [ ] Emerald entity_id 迁移到 `tenant_id:user_id`
+- [x] User 模型 + 密码认证
+- [x] OAuth2 Authorization Code flow（`POST /authorize`，PKCE，refresh token）
+- [x] Role 管理
+- [ ] Emerald entity_id 迁移到 `tenant_id:user_id`（在 Pandaria 侧实现）
 
 ---
 
@@ -311,7 +317,8 @@ Aspectus/
 3. **租户隔离不可违反**：任何查询/操作必须限定在调用者的 `tenant_id` 范围内。SQL 查询必须有 `WHERE tenant_id = $1`。
 4. **审计日志不可变**：`AuditLog` 表 append-only，无 UPDATE/DELETE。敏感的 token 操作（创建、吊销）必须记录。
 5. **密钥不得出现在日志中**：JWT signature、API Key 原文、用户密码——禁止出现在任何 tracing span、日志、错误消息中。
-6. **跨租户登录路由**：`/login` 必须按 `(tenant_id, email)` 复合查找用户（ADR-016 决策 1），不得仅按 email 查询（跨租户同邮箱会路由到错误身份）。`/login/lookup` 端点对未知邮箱必须返回空列表（非 4xx），避免邮箱枚举攻击。
+6. **跨租户登录路由**：`/login`、`/authorize` 与 `/forgot-password` 必须按 `(tenant_id, email)` 复合查找用户（ADR-016 决策 1），不得仅按 email 查询（跨租户同邮箱会路由到错误身份）。`/login/lookup` 端点对未知邮箱必须返回空列表（非 4xx），避免邮箱枚举攻击。
+7. **管理 API 需要 admin service token**：管理端点（`/tenants`、`/users`、`/api-keys` 等）必须使用属于内部 `aspectus` 项目的 service token，消费项目 token（pandaria、constell 等）不得调用管理端点。
 
 ---
 
@@ -339,7 +346,7 @@ Aspectus/
 - ❌ 用户自助注册 / 密码重置流程（MVP 阶段）
 - ❌ 组织架构管理（部门、汇报链）
 - ❌ 数据级授权（属于 Heirloom）
-- ❌ Web UI（管理界面在 Daypaw 中实现，不在 Aspectus 中）
+- ❌ 面向终端用户的 Web UI / 登录页（Aspectus 仅提供管理控制台用于内部运维；各项目的登录 UI 由各项目自建）
 
 ---
 

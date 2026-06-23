@@ -12,7 +12,6 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use hex;
 use sha2::{Digest, Sha256};
 
 use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier};

@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::Request,
@@ -10,41 +8,78 @@ use axum::{
     Json,
 };
 use serde_json::json;
-use tokio::sync::Mutex;
 
-/// In-memory sliding-window rate limiter.
+use aspectus_auth::RedisCache;
+
+/// Redis-backed fixed-window rate limiter.
 ///
-/// Tracks request timestamps per-key within a sliding window.
-/// For multi-replica deployments, replace with a Redis-backed implementation.
+/// Keys are bucketed by `now / window_secs`, so the limit is enforced per
+/// window cluster-wide. This replaces the previous in-memory implementation,
+/// which did not share state across replicas.
 #[derive(Clone)]
 pub struct RateLimiter {
-    inner: Arc<Mutex<HashMap<String, Vec<Instant>>>>,
+    redis: RedisCache,
     max_requests: usize,
-    window: Duration,
+    window_secs: u64,
 }
 
 impl RateLimiter {
-    pub fn new(max_requests: usize, window_secs: u64) -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(HashMap::new())),
+    pub async fn new(
+        redis_client: redis::Client,
+        max_requests: usize,
+        window_secs: u64,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            redis: RedisCache::new(redis_client).await?,
             max_requests,
-            window: Duration::from_secs(window_secs),
-        }
+            window_secs,
+        })
     }
 
     /// Check if a request under `key` is within the rate limit.
     /// Returns `true` if allowed, `false` if rate-limited.
-    async fn check(&self, key: &str) -> bool {
-        let mut map = self.inner.lock().await;
-        let now = Instant::now();
-        let window_start = now - self.window;
-        let timestamps = map.entry(key.to_string()).or_default();
-        timestamps.retain(|t| *t > window_start);
-        if timestamps.len() >= self.max_requests {
-            return false;
+    pub async fn check(&self, key: &str) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let bucket = now / self.window_secs.max(1);
+        let redis_key = format!("aspectus:rate_limit:{}:{}", key, bucket);
+
+        // Atomically increment the counter and set TTL on first hit.
+        let script = r#"
+            local key = KEYS[1]
+            local max = tonumber(ARGV[1])
+            local ttl = tonumber(ARGV[2])
+            local current = redis.call('INCR', key)
+            if current == 1 then
+                redis.call('EXPIRE', key, ttl)
+            end
+            if current > max then
+                return 0
+            end
+            return 1
+        "#;
+
+        let allowed: redis::RedisResult<i64> = redis::Script::new(script)
+            .key(&redis_key)
+            .arg(self.max_requests as i64)
+            .arg(self.window_secs as i64)
+            .invoke_async(&mut self.redis.conn())
+            .await;
+
+        match allowed {
+            Ok(1) => true,
+            Ok(_) => false,
+            Err(e) => {
+                // Fail open: if Redis is unavailable, do not block requests.
+                // This preserves availability at the cost of temporary rate-limit
+                // enforcement. A fail-closed variant can be added later for
+                // stricter SLAs.
+                tracing::warn!(error = %e, key = %key, "Redis rate limit check failed; allowing request");
+                true
+            }
         }
-        timestamps.push(now);
-        true
     }
 }
 

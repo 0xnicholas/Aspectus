@@ -139,7 +139,7 @@ fn problem_details_with_code_errors() {
 #[test]
 fn core_error_not_found_to_problem_details() {
     use aspectus_core::error::CoreError;
-    let err = CoreError::NotFound { entity: "User".into(), id: "u1".into() };
+    let err = CoreError::NotFound { entity: "User", id: "u1".into() };
     let pd = ProblemDetails::from(err);
     let json = serde_json::to_value(&pd).unwrap();
     assert_eq!(json["status"], 404);

@@ -98,6 +98,7 @@ fn project_from_str_all_variants() {
     assert_eq!("constell".parse::<Project>().unwrap(), Project::Constell);
     assert_eq!("tokencamp".parse::<Project>().unwrap(), Project::Tokencamp);
     assert_eq!("heirloom".parse::<Project>().unwrap(), Project::Heirloom);
+    assert_eq!("aspectus".parse::<Project>().unwrap(), Project::Aspectus);
 }
 
 #[test]
@@ -113,7 +114,7 @@ fn project_from_str_invalid_returns_err() {
 #[test]
 fn project_display_roundtrips() {
     for p in &[Project::Pandaria, Project::Emerald,
-                Project::Constell, Project::Tokencamp, Project::Heirloom] {
+                Project::Constell, Project::Tokencamp, Project::Heirloom, Project::Aspectus] {
         let s = p.to_string();
         let parsed: Project = s.parse().unwrap();
         assert_eq!(*p, parsed);
@@ -276,7 +277,7 @@ fn tenant_quotas_default_empty_object() {
 fn not_found_error_format() {
     use crate::error::CoreError;
     let err = CoreError::NotFound {
-        entity: "Tenant".into(),
+        entity: "Tenant",
         id: "t-nonexistent".into(),
     };
     assert!(err.to_string().contains("Tenant"));

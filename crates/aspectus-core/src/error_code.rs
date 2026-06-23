@@ -76,6 +76,10 @@ pub enum ErrorCode {
     /// Number of scopes exceeds the per-key limit.
     ScopeExceedsMax,
 
+    // ---- Conflict (409) ----
+    /// The requested resource already exists and cannot be duplicated.
+    Conflict,
+
     // ---- Rate Limiting (429) ----
     /// The client has sent too many requests in a given time window.
     TooManyRequests,
@@ -131,6 +135,8 @@ impl ErrorCode {
             Self::RoleTypeMismatch => "role_type_mismatch",
             Self::InvalidCodeChallengeMethod => "invalid_code_challenge_method",
             Self::ScopeExceedsMax => "scope_exceeds_max",
+            // 409
+            Self::Conflict => "conflict",
             // 429
             Self::TooManyRequests => "too_many_requests",
             // 500
@@ -173,6 +179,7 @@ impl ErrorCode {
             | Self::RoleTypeMismatch
             | Self::InvalidCodeChallengeMethod
             | Self::ScopeExceedsMax => 422,
+            Self::Conflict => 409,
             Self::TooManyRequests => 429,
             Self::InternalError | Self::ServiceUnavailable => 500,
         }
@@ -219,6 +226,7 @@ mod tests {
             ErrorCode::RoleTypeMismatch,
             ErrorCode::InvalidCodeChallengeMethod,
             ErrorCode::ScopeExceedsMax,
+            ErrorCode::Conflict,
             ErrorCode::TooManyRequests,
             ErrorCode::InternalError,
             ErrorCode::ServiceUnavailable,

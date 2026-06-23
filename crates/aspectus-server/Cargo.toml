@@ -28,7 +28,10 @@ getrandom = "0.2"
 hex = "0.4"
 
 sha2.workspace = true
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "pool", "tokio1-rustls-tls", "builder"] }
+
 [dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
 testcontainers.workspace = true
 testcontainers-modules.workspace = true
 tokio.workspace = true

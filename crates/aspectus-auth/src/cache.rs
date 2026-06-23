@@ -19,7 +19,7 @@ impl RedisCache {
         })
     }
 
-    fn conn(&self) -> ConnectionManager {
+    pub fn conn(&self) -> ConnectionManager {
         self.conn.clone()
     }
 

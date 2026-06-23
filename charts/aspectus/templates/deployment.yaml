@@ -55,6 +55,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "aspectus.fullname" . }}-secret
                   key: jwt-public-key-pem
+            - name: ASPECTUS_ADMIN_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "aspectus.fullname" . }}-secret
+                  key: admin-service-token
             - name: DB_MAX_CONNECTIONS
               value: {{ .Values.config.dbMaxConnections | quote }}
             - name: DB_MIN_CONNECTIONS

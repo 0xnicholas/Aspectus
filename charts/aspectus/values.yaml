@@ -27,10 +27,9 @@ secrets:
   redisUrl: ""
   jwtPrivateKeyPem: ""
   jwtPublicKeyPem: ""
-  # Service tokens: base64-encoded JSON map of project→token
-  # {"pandaria": "...", "constell": "...", ...}
-  # Note: 'tavern' removed 2026-06-21 (merged into Pandaria).
-  serviceTokens: ""
+  # Required: admin service token for management endpoints.
+  # Must be a strong, rotated secret in production.
+  adminServiceToken: ""
 
 resources:
   requests:

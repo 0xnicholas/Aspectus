@@ -5,6 +5,7 @@ use crate::{
     audit_log::AuditLog,
     project::Project,
     service_account::ServiceAccount,
+    service_token::ServiceToken,
     tenant::Tenant,
 };
 
@@ -81,19 +82,67 @@ pub trait ApiKeyStore: Send + Sync {
     async fn revoke(&self, id: &str) -> Result<bool, crate::error::CoreError>;
 }
 
+/// Filter for querying audit logs.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct AuditLogFilter {
+    pub tenant_id: Option<String>,
+    pub action: Option<String>,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub actor_id: Option<String>,
+    pub from: Option<chrono::DateTime<chrono::Utc>>,
+    pub to: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default = "default_audit_limit")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn default_audit_limit() -> i64 {
+    100
+}
+
 /// Persistence layer for AuditLog. Append-only: no UPDATE or DELETE.
 #[async_trait]
 pub trait AuditLogStore: Send + Sync {
     async fn append(&self, entry: AuditLog) -> Result<(), crate::error::CoreError>;
+
+    /// Query audit logs with optional filters, ordered by `created_at DESC`.
+    async fn list(
+        &self,
+        filter: AuditLogFilter,
+    ) -> Result<Vec<AuditLog>, crate::error::CoreError>;
 }
 
-/// Persistence layer for ServiceToken lookup.
+/// Persistence layer for ServiceToken lookup and lifecycle management.
 #[async_trait]
 pub trait ServiceTokenStore: Send + Sync {
+    /// Look up a token by hash, returning the project only if the token is active.
     async fn find_by_hash(
         &self,
         token_hash: &str,
     ) -> Result<Option<Project>, crate::error::CoreError>;
+
+    /// List all stored service tokens, including revoked ones.
+    async fn list(&self) -> Result<Vec<ServiceToken>, crate::error::CoreError>;
+
+    /// Get a service token by project, including revoked ones.
+    async fn get_by_project(
+        &self,
+        project: &Project,
+    ) -> Result<Option<ServiceToken>, crate::error::CoreError>;
+
+    /// Insert or replace the token for a project. Returns the previous hash
+    /// (if any) so the caller can invalidate Redis caches.
+    async fn upsert(
+        &self,
+        project: Project,
+        token_hash: &str,
+        token_prefix: &str,
+    ) -> Result<Option<String>, crate::error::CoreError>;
+
+    /// Soft-revoke a project's token. Returns true if a token was revoked.
+    async fn revoke(&self, project: &Project) -> Result<bool, crate::error::CoreError>;
 }
 
 /// Persistence layer for User operations (v0.5.0).
@@ -171,11 +220,14 @@ pub trait RefreshTokenStore: Send + Sync {
 /// Persistence layer for OAuth2 client registration (v0.9.0).
 #[async_trait]
 pub trait OAuth2ClientStore: Send + Sync {
+    /// Create a new OAuth2 client. `client_secret_hash` is the SHA-256 of the
+    /// plain-text secret, which the caller must generate and return exactly once.
     async fn create(
         &self,
         client_id: &str,
         name: &str,
         redirect_uris: &[String],
+        client_secret_hash: &str,
     ) -> Result<(), crate::error::CoreError>;
 
     async fn list(&self) -> Result<Vec<(String, String, Vec<String>)>, crate::error::CoreError>;
@@ -185,5 +237,14 @@ pub trait OAuth2ClientStore: Send + Sync {
         &self,
         client_id: &str,
         redirect_uri: &str,
+    ) -> Result<bool, crate::error::CoreError>;
+
+    /// Validate a client_secret against the stored hash.
+    /// Returns `Ok(true)` if the client has no secret configured (backward compat),
+    /// or if the provided secret matches the hash.
+    async fn validate_client_secret(
+        &self,
+        client_id: &str,
+        client_secret: &str,
     ) -> Result<bool, crate::error::CoreError>;
 }
