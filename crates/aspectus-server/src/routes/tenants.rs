@@ -70,6 +70,16 @@ pub async fn get(
     }
 }
 
+pub async fn list(State(state): State<AppState>) -> impl IntoResponse {
+    match state.tenant_store.list().await {
+        Ok(tenants) => (StatusCode::OK, Json(tenants)).into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to list tenants");
+            ProblemDetails::internal_error("Failed to list tenants").into_response()
+        }
+    }
+}
+
 pub async fn update_quotas(
     State(state): State<AppState>,
     Path(id): Path<String>,

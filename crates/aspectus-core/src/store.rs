@@ -13,6 +13,7 @@ use crate::{
 pub trait TenantStore: Send + Sync {
     async fn create(&self, name: &str) -> Result<Tenant, crate::error::CoreError>;
     async fn get_by_id(&self, id: &str) -> Result<Option<Tenant>, crate::error::CoreError>;
+    async fn list(&self) -> Result<Vec<Tenant>, crate::error::CoreError>;
 }
 
 /// Persistence layer for ServiceAccount operations.

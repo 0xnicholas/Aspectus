@@ -17,6 +17,14 @@ const TOKEN = import.meta.env.VITE_SERVICE_TOKEN || "";
 /// Base URL for the Aspectus API. Must be HTTPS in production.
 export const API_BASE = BASE;
 
+function qs(params: Record<string, string | number | undefined>) {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== "") parts.push(`${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`);
+  }
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   // In production, prefer the reverse proxy setting the Authorization header.
   const headers: Record<string, string> = {
@@ -44,7 +52,10 @@ export const api = {
   // Tenants
   createTenant: (name: string) =>
     request<any>("/tenants", { method: "POST", body: JSON.stringify({ name }) }),
+  listTenants: () => request<any[]>("/tenants"),
   getTenant: (id: string) => request<any>(`/tenants/${id}`),
+  updateTenantQuotas: (id: string, quotas: Record<string, any>) =>
+    request<void>(`/tenants/${id}/quotas`, { method: "PUT", body: JSON.stringify(quotas) }),
 
   // Users
   listUsers: (tenant_id: string) =>
@@ -57,7 +68,7 @@ export const api = {
   // API Keys
   listApiKeys: (service_account_id: string) =>
     request<any[]>(`/api-keys?service_account_id=${service_account_id}`),
-  createApiKey: (data: any) =>
+  createApiKey: (data: { owner_type: string; owner_id: string; project: string; scopes: string[]; expires_at?: string }) =>
     request<any>("/api-keys", { method: "POST", body: JSON.stringify(data) }),
   revokeApiKey: (id: string) =>
     request<void>(`/api-keys/${id}`, { method: "DELETE" }),
@@ -72,6 +83,28 @@ export const api = {
     request<any[]>(`/service-accounts?tenant_id=${tenant_id}`),
   createServiceAccount: (data: any) =>
     request<any>("/service-accounts", { method: "POST", body: JSON.stringify(data) }),
+
+  // Service Tokens
+  listServiceTokens: () => request<any[]>("/service-tokens"),
+  createServiceToken: (project: string) =>
+    request<any>("/service-tokens", { method: "POST", body: JSON.stringify({ project }) }),
+  rotateServiceToken: (project: string) =>
+    request<any>(`/service-tokens/${project}/rotate`, { method: "POST" }),
+  revokeServiceToken: (project: string) =>
+    request<void>(`/service-tokens/${project}`, { method: "DELETE" }),
+
+  // Audit Logs
+  listAuditLogs: (filter: {
+    tenant_id?: string;
+    action?: string;
+    target_type?: string;
+    target_id?: string;
+    actor_id?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  }) => request<any[]>(`/audit-logs${qs(filter)}`),
 
   // Roles
   listRoles: () => request<any[]>("/roles"),

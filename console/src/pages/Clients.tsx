@@ -7,11 +7,11 @@ export function Clients() {
   const [name, setName] = useState("");
   const [uris, setUris] = useState("");
 
-  useEffect(() => { load(); }, []);
-
   const load = async () => {
     try { setClients(await api.listClients()); } catch { toast("Failed to load clients", "error"); }
   };
+
+  useEffect(() => { load(); }, []);
 
   const create = async () => {
     if (!name || !uris) return toast("Name and redirect URIs required", "error");

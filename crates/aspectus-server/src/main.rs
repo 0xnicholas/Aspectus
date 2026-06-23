@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Management API (auth required + rate limited)
     let mgmt = Router::new()
-        .route("/tenants", post(aspectus_server::routes::tenants::create))
+        .route("/tenants", post(aspectus_server::routes::tenants::create).get(aspectus_server::routes::tenants::list))
         .route("/tenants/{id}", get(aspectus_server::routes::tenants::get))
         .route("/tenants/{id}/quotas", put(aspectus_server::routes::tenants::update_quotas))
         .route("/service-accounts", post(aspectus_server::routes::service_accounts::create).get(aspectus_server::routes::service_accounts::list))

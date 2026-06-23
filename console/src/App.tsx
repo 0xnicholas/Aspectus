@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Building2, UsersIcon, Key, Shield, Globe, ScrollText, UserCog } from "lucide-react";
+import { LayoutDashboard, Building2, UsersIcon, Key, Shield, Globe, ScrollText, UserCog, Lock } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { Tenants } from "./pages/Tenants";
 import { Users } from "./pages/Users";
@@ -8,6 +8,7 @@ import { ApiKeys } from "./pages/ApiKeys";
 import { Roles } from "./pages/Roles";
 import { Clients } from "./pages/Clients";
 import { AuditLogs } from "./pages/AuditLogs";
+import { ServiceTokens } from "./pages/ServiceTokens";
 
 const NAV = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -17,6 +18,7 @@ const NAV = [
   { path: "/api-keys", label: "API Keys", icon: Key },
   { path: "/roles", label: "Roles", icon: Shield },
   { path: "/clients", label: "OAuth2 Clients", icon: Globe },
+  { path: "/service-tokens", label: "Service Tokens", icon: Lock },
   { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
 ];
 
@@ -65,6 +67,7 @@ export default function App() {
             <Route path="/api-keys" element={<ApiKeys />} />
             <Route path="/roles" element={<Roles />} />
             <Route path="/clients" element={<Clients />} />
+            <Route path="/service-tokens" element={<ServiceTokens />} />
             <Route path="/audit-logs" element={<AuditLogs />} />
           </Routes>
         </main>

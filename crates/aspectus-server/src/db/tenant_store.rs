@@ -36,4 +36,11 @@ impl TenantStore for PgTenantStore {
             .await
             .map_err(|e| CoreError::Internal(e.to_string()))
     }
+
+    async fn list(&self) -> Result<Vec<Tenant>, CoreError> {
+        sqlx::query_as::<_, Tenant>("SELECT * FROM tenants ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| CoreError::Internal(e.to_string()))
+    }
 }
