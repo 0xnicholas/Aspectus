@@ -6,10 +6,10 @@
 pub mod config;
 pub mod db;
 pub mod email;
-pub mod scope_expander;
 pub mod error;
 pub mod middleware;
 pub mod routes;
+pub mod scope_expander;
 pub mod util;
 
 #[cfg(test)]
@@ -17,10 +17,14 @@ mod tests;
 
 use std::sync::Arc;
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, ServiceTokenVerifier, RedisCache, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
-use db::{PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
-    PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore};
+use aspectus_auth::{
+    ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier, TokenVerifier,
+};
+use db::{
+    PgApiKeyStore, PgAuditLogStore, PgAuthorizationCodeStore, PgOAuth2ClientStore,
+    PgRefreshTokenStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
+};
 
 /// Shared application state passed to all handlers via axum `State`.
 #[derive(Clone)]

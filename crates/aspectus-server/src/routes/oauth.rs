@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
@@ -6,13 +6,11 @@ use sha2::{Digest, Sha256};
 
 use aspectus_auth::password::PasswordHasher;
 use aspectus_core::identity::IdentityType;
-use aspectus_core::store::{
-    AuthorizationCodeStore, RefreshTokenStore, OAuth2ClientStore,
-};
+use aspectus_core::store::{AuthorizationCodeStore, OAuth2ClientStore, RefreshTokenStore};
 
+use crate::AppState;
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
-use crate::AppState;
 
 // ---- /authorize ----
 
@@ -39,19 +37,24 @@ pub async fn authorize(
     Json(req): Json<AuthorizeRequest>,
 ) -> impl IntoResponse {
     // Validate redirect_uri against registered client
-    let valid = match state.oauth_client_store
+    let valid = match state
+        .oauth_client_store
         .validate_redirect_uri(&req.client_id, &req.redirect_uri)
         .await
     {
         Ok(v) => v,
         Err(e) => {
             tracing::error!(error = %e, "Failed to validate OAuth2 client");
-            return ProblemDetails::internal_error("Authentication service temporarily unavailable").into_response();
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
         }
     };
 
     if !valid {
-        return ProblemDetails::validation_failed("Invalid client_id or redirect_uri", vec![]).into_response();
+        return ProblemDetails::validation_failed("Invalid client_id or redirect_uri", vec![])
+            .into_response();
     }
 
     // PKCE: if code_challenge is provided, method must be S256
@@ -59,7 +62,8 @@ pub async fn authorize(
         return ProblemDetails::validation_failed(
             "code_challenge_method must be S256 when code_challenge is provided",
             vec![],
-        ).into_response();
+        )
+        .into_response();
     }
 
     // ADR-016: look up user by (tenant_id, email) to prevent cross-tenant
@@ -72,16 +76,23 @@ pub async fn authorize(
     .fetch_optional(&state.pool)
     .await
     {
-        Ok(Some((id, tid, hash))) => {
-            match PasswordHasher::verify(&req.password, &hash) {
-                Ok(true) => (id, tid),
-                _ => return ProblemDetails::unauthorized("Invalid credentials", "/authorize").into_response(),
+        Ok(Some((id, tid, hash))) => match PasswordHasher::verify(&req.password, &hash) {
+            Ok(true) => (id, tid),
+            _ => {
+                return ProblemDetails::unauthorized("Invalid credentials", "/authorize")
+                    .into_response();
             }
+        },
+        Ok(None) => {
+            return ProblemDetails::unauthorized("Invalid credentials", "/authorize")
+                .into_response();
         }
-        Ok(None) => return ProblemDetails::unauthorized("Invalid credentials", "/authorize").into_response(),
         Err(e) => {
             tracing::error!(error = %e, tenant_id = %req.tenant_id, email_hash = %hex::encode(Sha256::digest(req.email.as_bytes())), "User lookup failed");
-            return ProblemDetails::internal_error("Authentication service temporarily unavailable").into_response();
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
         }
     };
 
@@ -92,22 +103,31 @@ pub async fn authorize(
 
     let expires_at = Utc::now() + chrono::Duration::seconds(300);
 
-    let _ = state.auth_code_store
-        .create_code(&code, &user_id, &req.client_id, &req.redirect_uri, expires_at)
+    let _ = state
+        .auth_code_store
+        .create_code(
+            &code,
+            &user_id,
+            &req.client_id,
+            &req.redirect_uri,
+            expires_at,
+        )
         .await;
 
     // Store code_challenge if PKCE is in use
     if let Some(ref challenge) = req.code_challenge {
-        let _ = sqlx::query(
-            "UPDATE authorization_codes SET code_challenge = $1 WHERE code = $2",
-        )
-        .bind(challenge)
-        .bind(&code)
-        .execute(&state.pool)
-        .await;
+        let _ = sqlx::query("UPDATE authorization_codes SET code_challenge = $1 WHERE code = $2")
+            .bind(challenge)
+            .bind(&code)
+            .execute(&state.pool)
+            .await;
     }
 
-    (StatusCode::OK, Json(json!({"code": code, "redirect_uri": req.redirect_uri}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({"code": code, "redirect_uri": req.redirect_uri})),
+    )
+        .into_response()
 }
 
 // ---- /token ----
@@ -135,30 +155,51 @@ pub async fn token(
         "authorization_code" => {
             let code = match &req.code {
                 Some(c) => c.clone(),
-                None => return ProblemDetails::validation_failed("code required", vec![]).into_response(),
+                None => {
+                    return ProblemDetails::validation_failed("code required", vec![])
+                        .into_response();
+                }
             };
 
             let request_client_id = match &req.client_id {
                 Some(id) => id.as_str(),
-                None => return ProblemDetails::validation_failed("client_id required", vec![]).into_response(),
+                None => {
+                    return ProblemDetails::validation_failed("client_id required", vec![])
+                        .into_response();
+                }
             };
             let client_secret = req.client_secret.as_deref().unwrap_or("");
 
-            match state.oauth_client_store.validate_client_secret(request_client_id, client_secret).await {
+            match state
+                .oauth_client_store
+                .validate_client_secret(request_client_id, client_secret)
+                .await
+            {
                 Ok(true) => {}
-                Ok(false) => return ProblemDetails::unauthorized("Invalid client_id or client_secret", "/token").into_response(),
+                Ok(false) => {
+                    return ProblemDetails::unauthorized(
+                        "Invalid client_id or client_secret",
+                        "/token",
+                    )
+                    .into_response();
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "Client secret validation failed");
-                    return ProblemDetails::internal_error("Token service temporarily unavailable").into_response();
+                    return ProblemDetails::internal_error("Token service temporarily unavailable")
+                        .into_response();
                 }
             }
 
             let row = match state.auth_code_store.exchange_code(&code).await {
                 Ok(Some(r)) => r,
-                Ok(None) => return ProblemDetails::unauthorized("Invalid or expired code", "/token").into_response(),
+                Ok(None) => {
+                    return ProblemDetails::unauthorized("Invalid or expired code", "/token")
+                        .into_response();
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "Code exchange failed");
-                    return ProblemDetails::internal_error("Token service temporarily unavailable").into_response();
+                    return ProblemDetails::internal_error("Token service temporarily unavailable")
+                        .into_response();
                 }
             };
             let (user_id, client_id, _redirect_uri) = row;
@@ -181,46 +222,70 @@ pub async fn token(
                 if let Some(expected_challenge) = challenge {
                     let actual_challenge = hex::encode(Sha256::digest(verifier.as_bytes()));
                     if actual_challenge != expected_challenge {
-                        return ProblemDetails::unauthorized("Invalid code_verifier", "/token").into_response();
+                        return ProblemDetails::unauthorized("Invalid code_verifier", "/token")
+                            .into_response();
                     }
                 }
             }
 
-            let tenant_id = match sqlx::query_as::<_, (String,)>(
-                "SELECT tenant_id FROM users WHERE id = $1",
-            )
-            .bind(&user_id)
-            .fetch_optional(&state.pool)
-            .await
-            {
-                Ok(Some((tid,))) => tid,
-                Ok(None) => return ProblemDetails::internal_error("User not found").into_response(),
-                Err(e) => {
-                    tracing::error!(error = %e, user_id = %user_id, "User lookup failed");
-                    return ProblemDetails::internal_error("Token service temporarily unavailable").into_response();
-                }
-            };
+            let tenant_id =
+                match sqlx::query_as::<_, (String,)>("SELECT tenant_id FROM users WHERE id = $1")
+                    .bind(&user_id)
+                    .fetch_optional(&state.pool)
+                    .await
+                {
+                    Ok(Some((tid,))) => tid,
+                    Ok(None) => {
+                        return ProblemDetails::internal_error("User not found").into_response();
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, user_id = %user_id, "User lookup failed");
+                        return ProblemDetails::internal_error(
+                            "Token service temporarily unavailable",
+                        )
+                        .into_response();
+                    }
+                };
 
-            issue_tokens(&state, &user_id, &tenant_id, &client_id).await.into_response()
+            issue_tokens(&state, &user_id, &tenant_id, &client_id)
+                .await
+                .into_response()
         }
         "refresh_token" => {
             let token = match &req.refresh_token {
                 Some(t) => t.clone(),
-                None => return ProblemDetails::validation_failed("refresh_token required", vec![]).into_response(),
+                None => {
+                    return ProblemDetails::validation_failed("refresh_token required", vec![])
+                        .into_response();
+                }
             };
 
             let request_client_id = match &req.client_id {
                 Some(id) => id.as_str(),
-                None => return ProblemDetails::validation_failed("client_id required", vec![]).into_response(),
+                None => {
+                    return ProblemDetails::validation_failed("client_id required", vec![])
+                        .into_response();
+                }
             };
             let client_secret = req.client_secret.as_deref().unwrap_or("");
 
-            match state.oauth_client_store.validate_client_secret(request_client_id, client_secret).await {
+            match state
+                .oauth_client_store
+                .validate_client_secret(request_client_id, client_secret)
+                .await
+            {
                 Ok(true) => {}
-                Ok(false) => return ProblemDetails::unauthorized("Invalid client_id or client_secret", "/token").into_response(),
+                Ok(false) => {
+                    return ProblemDetails::unauthorized(
+                        "Invalid client_id or client_secret",
+                        "/token",
+                    )
+                    .into_response();
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "Client secret validation failed");
-                    return ProblemDetails::internal_error("Token service temporarily unavailable").into_response();
+                    return ProblemDetails::internal_error("Token service temporarily unavailable")
+                        .into_response();
                 }
             }
 
@@ -229,7 +294,8 @@ pub async fn token(
             match state.refresh_token_store.rotate(&hash).await {
                 Ok(Some((user_id, client_id, _))) => {
                     if client_id != request_client_id {
-                        return ProblemDetails::unauthorized("Invalid client_id", "/token").into_response();
+                        return ProblemDetails::unauthorized("Invalid client_id", "/token")
+                            .into_response();
                     }
                     let tenant_id = match sqlx::query_as::<_, (String,)>(
                         "SELECT tenant_id FROM users WHERE id = $1",
@@ -239,9 +305,14 @@ pub async fn token(
                     .await
                     {
                         Ok(Some((tid,))) => tid,
-                        _ => return ProblemDetails::internal_error("User not found").into_response(),
+                        _ => {
+                            return ProblemDetails::internal_error("User not found")
+                                .into_response();
+                        }
                     };
-                    issue_tokens(&state, &user_id, &tenant_id, &client_id).await.into_response()
+                    issue_tokens(&state, &user_id, &tenant_id, &client_id)
+                        .await
+                        .into_response()
                 }
                 Ok(None) => {
                     // Token not found or already revoked — check for replay attack
@@ -250,7 +321,8 @@ pub async fn token(
                         && is_revoked
                     {
                         // Replay detected: revoke all tokens for this user
-                        let count = state.refresh_token_store
+                        let count = state
+                            .refresh_token_store
                             .revoke_all_for_user(&user_id)
                             .await
                             .unwrap_or(0);
@@ -260,11 +332,13 @@ pub async fn token(
                             "Refresh token replay detected — revoked all user tokens"
                         );
                     }
-                    ProblemDetails::unauthorized("Invalid or expired refresh_token", "/token").into_response()
+                    ProblemDetails::unauthorized("Invalid or expired refresh_token", "/token")
+                        .into_response()
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "Refresh token rotation failed");
-                    ProblemDetails::internal_error("Token service temporarily unavailable").into_response()
+                    ProblemDetails::internal_error("Token service temporarily unavailable")
+                        .into_response()
                 }
             }
         }
@@ -273,50 +347,61 @@ pub async fn token(
 }
 
 pub async fn issue_tokens(
-    state: &AppState, user_id: &str, tenant_id: &str, client_id: &str,
+    state: &AppState,
+    user_id: &str,
+    tenant_id: &str,
+    client_id: &str,
 ) -> impl IntoResponse {
-    let ttl: u64 = std::env::var("JWT_TTL_SECONDS").ok()
-        .and_then(|s| s.parse().ok()).unwrap_or(900);
+    let ttl: u64 = std::env::var("JWT_TTL_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(900);
 
-    let project = client_id.parse().unwrap_or(aspectus_core::project::Project::Pandaria);
+    let project = client_id
+        .parse()
+        .unwrap_or(aspectus_core::project::Project::Pandaria);
 
     // Expand scope from user roles
-    let scopes = crate::scope_expander::ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await;
+    let scopes = crate::scope_expander::ScopeExpander::expand(
+        &state.pool,
+        user_id,
+        Some(&state.scope_cache),
+    )
+    .await;
 
     // ADR-016: Look up tenant info to embed in JWT + response.
     // These are best-effort — failures are logged but don't fail token issuance.
-    let tenant_row: Option<(String, Option<String>)> = sqlx::query_as(
-        "SELECT name, logo_url FROM tenants WHERE id = $1",
-    )
-    .bind(tenant_id)
-    .fetch_optional(&state.pool)
-    .await
-    .unwrap_or(None);
+    let tenant_row: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT name, logo_url FROM tenants WHERE id = $1")
+            .bind(tenant_id)
+            .fetch_optional(&state.pool)
+            .await
+            .unwrap_or(None);
 
     let tenant_name = tenant_row.as_ref().map(|(n, _)| n.clone());
     let tenant_logo_url = tenant_row.and_then(|(_, logo)| logo);
 
-    let user_info: Option<(String, Option<String>)> = sqlx::query_as(
-        "SELECT email, display_name FROM users WHERE id = $1",
-    )
-    .bind(user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .unwrap_or(None);
+    let user_info: Option<(String, Option<String>)> =
+        sqlx::query_as("SELECT email, display_name FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&state.pool)
+            .await
+            .unwrap_or(None);
 
-    let (user_email, user_display_name) = user_info
-        .map(|(e, d)| (Some(e), d))
-        .unwrap_or((None, None));
+    let (user_email, user_display_name) =
+        user_info.map(|(e, d)| (Some(e), d)).unwrap_or((None, None));
 
-    let access = match state.jwt_signer.sign_with_tenant_name(aspectus_auth::jwt::JwtSignRequest {
-        sub: user_id.to_string(),
-        tenant_id: tenant_id.to_string(),
-        tenant_name: tenant_name.clone(),
-        project,
-        scopes: scopes.clone(),
-        identity_type: IdentityType::User,
-        ttl_seconds: ttl,
-    }) {
+    let access = match state
+        .jwt_signer
+        .sign_with_tenant_name(aspectus_auth::jwt::JwtSignRequest {
+            sub: user_id.to_string(),
+            tenant_id: tenant_id.to_string(),
+            tenant_name: tenant_name.clone(),
+            project,
+            scopes: scopes.clone(),
+            identity_type: IdentityType::User,
+            ttl_seconds: ttl,
+        }) {
         Ok(t) => t,
         Err(e) => return ProblemDetails::from(e).into_response(),
     };
@@ -327,7 +412,8 @@ pub async fn issue_tokens(
     let refresh = format!("rt_{}", hex::encode(raw));
     let refresh_hash = hex::encode(Sha256::digest(refresh.as_bytes()));
 
-    let _ = state.refresh_token_store
+    let _ = state
+        .refresh_token_store
         .create(
             &refresh_hash,
             user_id,
@@ -338,8 +424,7 @@ pub async fn issue_tokens(
 
     // ADR-016: Derive available_projects from the expanded scope string.
     // Reuses the helper so the parsing logic is unit-tested.
-    let available_projects: Vec<String> =
-        crate::scope_expander::projects_from_scopes(&scopes);
+    let available_projects: Vec<String> = crate::scope_expander::projects_from_scopes(&scopes);
 
     // ADR-016: Enhanced response — user + tenant context so clients don't need
     // extra API calls to display "Acme Corp's alice".
@@ -400,15 +485,20 @@ pub async fn create_client(
     let secret = hex::encode(raw);
     let secret_hash = hex::encode(Sha256::digest(secret.as_bytes()));
 
-    match state.oauth_client_store
+    match state
+        .oauth_client_store
         .create(&id, &req.name, &req.redirect_uris, &secret_hash)
         .await
     {
-        Ok(()) => (StatusCode::CREATED, Json(json!({
-            "client_id": id,
-            "name": req.name,
-            "client_secret": secret,
-        }))).into_response(),
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json(json!({
+                "client_id": id,
+                "name": req.name,
+                "client_secret": secret,
+            })),
+        )
+            .into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to create OAuth2 client");
             ProblemDetails::internal_error("Failed to create client").into_response()

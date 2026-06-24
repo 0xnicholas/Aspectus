@@ -4,10 +4,7 @@
 //! (password_hash/key_hash never leak), and API contracts.
 
 use crate::{
-    identity::IdentityType,
-    introspect::IntrospectResponse,
-    project::Project,
-    role::Role,
+    identity::IdentityType, introspect::IntrospectResponse, project::Project, role::Role,
     scope::Scope,
 };
 
@@ -70,7 +67,10 @@ fn introspect_roundtrip_preserves_all_fields() {
 #[test]
 fn introspect_quotas_serialized_when_present() {
     let mut quotas = std::collections::HashMap::new();
-    quotas.insert("tokencamp".into(), serde_json::json!({"monthly_tokens": 10000000}));
+    quotas.insert(
+        "tokencamp".into(),
+        serde_json::json!({"monthly_tokens": 10000000}),
+    );
     let r = IntrospectResponse {
         active: true,
         tenant_id: Some("t1".into()),
@@ -107,14 +107,22 @@ fn project_from_str_invalid_returns_err() {
     assert!(Project::from_str("").is_err());
     assert!(Project::from_str("PANDARIA").is_err()); // case-sensitive
     // Tavern was removed 2026-06-21 (merged into Pandaria). It must NOT parse.
-    assert!(Project::from_str("tavern").is_err(),
-        "tavern must no longer parse as Project (Tavern was merged into Pandaria 2026-06-21)");
+    assert!(
+        Project::from_str("tavern").is_err(),
+        "tavern must no longer parse as Project (Tavern was merged into Pandaria 2026-06-21)"
+    );
 }
 
 #[test]
 fn project_display_roundtrips() {
-    for p in &[Project::Pandaria, Project::Emerald,
-                Project::Constell, Project::Tokencamp, Project::Heirloom, Project::Aspectus] {
+    for p in &[
+        Project::Pandaria,
+        Project::Emerald,
+        Project::Constell,
+        Project::Tokencamp,
+        Project::Heirloom,
+        Project::Aspectus,
+    ] {
         let s = p.to_string();
         let parsed: Project = s.parse().unwrap();
         assert_eq!(*p, parsed);
@@ -189,8 +197,14 @@ fn user_password_hash_not_in_json() {
         updated_at: chrono::Utc::now(),
     };
     let json = serde_json::to_string(&user).unwrap();
-    assert!(!json.contains("password_hash"), "password_hash must be #[serde(skip)]");
-    assert!(!json.contains("argon2"), "password hash value must not leak");
+    assert!(
+        !json.contains("password_hash"),
+        "password_hash must be #[serde(skip)]"
+    );
+    assert!(
+        !json.contains("argon2"),
+        "password hash value must not leak"
+    );
 }
 
 // ---- CreatedApiKey serialization ----
@@ -220,7 +234,10 @@ fn scope_name_follows_project_resource_action_format() {
         name: "pandaria:session:create".into(),
         description: None,
     };
-    assert!(s.name.contains(':'), "Scope should be in project:resource:action format");
+    assert!(
+        s.name.contains(':'),
+        "Scope should be in project:resource:action format"
+    );
     let parts: Vec<&str> = s.name.splitn(3, ':').collect();
     assert_eq!(parts.len(), 3);
     assert_eq!(parts[0], "pandaria");

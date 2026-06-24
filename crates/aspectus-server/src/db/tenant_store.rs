@@ -19,14 +19,12 @@ impl TenantStore for PgTenantStore {
     async fn create(&self, name: &str) -> Result<Tenant, CoreError> {
         let id = generate_id();
 
-        sqlx::query_as::<_, Tenant>(
-            "INSERT INTO tenants (id, name) VALUES ($1, $2) RETURNING *",
-        )
-        .bind(&id)
-        .bind(name)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| CoreError::Internal(e.to_string()))
+        sqlx::query_as::<_, Tenant>("INSERT INTO tenants (id, name) VALUES ($1, $2) RETURNING *")
+            .bind(&id)
+            .bind(name)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| CoreError::Internal(e.to_string()))
     }
 
     async fn get_by_id(&self, id: &str) -> Result<Option<Tenant>, CoreError> {

@@ -23,18 +23,24 @@ async fn setup_user(app: &axum::Router) -> (String, String, String, String) {
     let tenant_id = tenant["id"].as_str().unwrap().to_string();
 
     // Create user
-    let email = format!("oauth-test-{}@test.com", chrono::Utc::now().timestamp_millis());
+    let email = format!(
+        "oauth-test-{}@test.com",
+        chrono::Utc::now().timestamp_millis()
+    );
     let req = Request::builder()
         .uri("/users")
         .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": &tenant_id,
-            "email": &email,
-            "password": "oauth-password-123",
-            "display_name": "OAuth Test User"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": &tenant_id,
+                "email": &email,
+                "password": "oauth-password-123",
+                "display_name": "OAuth Test User"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
@@ -47,10 +53,13 @@ async fn setup_user(app: &axum::Router) -> (String, String, String, String) {
         .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "name": "test-client",
-            "redirect_uris": ["https://example.com/cb"]
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "name": "test-client",
+                "redirect_uris": ["https://example.com/cb"]
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
@@ -82,13 +91,16 @@ async fn authorize_wrong_password_returns_401() {
         .uri("/authorize")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": email,
-            "tenant_id": &tenant_id,
-            "password": "wrong-password",
-            "client_id": client_id,
-            "redirect_uri": "https://example.com/cb"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": email,
+                "tenant_id": &tenant_id,
+                "password": "wrong-password",
+                "client_id": client_id,
+                "redirect_uri": "https://example.com/cb"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -103,13 +115,16 @@ async fn authorize_invalid_client_returns_422() {
         .uri("/authorize")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": email,
-            "tenant_id": &tenant_id,
-            "password": "oauth-password-123",
-            "client_id": "nonexistent-client",
-            "redirect_uri": "https://example.com/cb"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": email,
+                "tenant_id": &tenant_id,
+                "password": "oauth-password-123",
+                "client_id": "nonexistent-client",
+                "redirect_uri": "https://example.com/cb"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -124,13 +139,16 @@ async fn authorize_invalid_redirect_uri_returns_422() {
         .uri("/authorize")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": email,
-            "tenant_id": &tenant_id,
-            "password": "oauth-password-123",
-            "client_id": client_id,
-            "redirect_uri": "https://evil.com/steal"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": email,
+                "tenant_id": &tenant_id,
+                "password": "oauth-password-123",
+                "client_id": client_id,
+                "redirect_uri": "https://evil.com/steal"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -146,13 +164,16 @@ async fn full_oauth2_authorization_code_flow() {
         .uri("/authorize")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": &email,
-            "tenant_id": &tenant_id,
-            "password": "oauth-password-123",
-            "client_id": &client_id,
-            "redirect_uri": "https://example.com/cb"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": &email,
+                "tenant_id": &tenant_id,
+                "password": "oauth-password-123",
+                "client_id": &client_id,
+                "redirect_uri": "https://example.com/cb"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -165,12 +186,15 @@ async fn full_oauth2_authorization_code_flow() {
         .uri("/oauth/token")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "grant_type": "authorization_code",
-            "code": code,
-            "client_id": client_id,
-            "client_secret": client_secret
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -189,16 +213,23 @@ async fn authorization_code_is_one_time_use() {
 
     // Get code
     let req = Request::builder()
-        .uri("/authorize").method("POST")
+        .uri("/authorize")
+        .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": &email, "tenant_id": &tenant_id, "password": "oauth-password-123",
-            "client_id": &client_id, "redirect_uri": "https://example.com/cb"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": &email, "tenant_id": &tenant_id, "password": "oauth-password-123",
+                "client_id": &client_id, "redirect_uri": "https://example.com/cb"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
-    let code = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"].as_str().unwrap().to_string();
+    let code = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // First exchange — succeeds
     let req = Request::builder().uri("/oauth/token").method("POST")
@@ -221,7 +252,8 @@ async fn authorization_code_is_one_time_use() {
 async fn token_unsupported_grant_type_returns_422() {
     let (app, _) = common::build_app().await.unwrap();
     let req = Request::builder()
-        .uri("/oauth/token").method("POST")
+        .uri("/oauth/token")
+        .method("POST")
         .header("Content-Type", "application/json")
         .body(Body::from(json!({"grant_type":"password"}).to_string()))
         .unwrap();

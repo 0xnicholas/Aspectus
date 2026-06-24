@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use aspectus_core::identity::IdentityType;
 use aspectus_core::introspect::IntrospectResponse;
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
@@ -124,10 +124,7 @@ impl AspectusClient {
     }
 
     /// Create a client without JWT verifier (for test/offline use).
-    pub fn without_jwt(
-        base_url: impl Into<String>,
-        service_token: impl Into<String>,
-    ) -> Self {
+    pub fn without_jwt(base_url: impl Into<String>, service_token: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),
             service_token: service_token.into(),
@@ -307,7 +304,10 @@ impl JwtVerifier {
             .await
             .map_err(|e| ClientError::JwksFetch(format!("Failed to parse JWKS: {e}")))?;
 
-        let key = jwks.keys.into_iter().find(|k| k.alg.as_deref() == Some("RS256"))
+        let key = jwks
+            .keys
+            .into_iter()
+            .find(|k| k.alg.as_deref() == Some("RS256"))
             .ok_or(ClientError::JwksInvalid)?;
 
         let decoding_key = DecodingKey::from_rsa_components(&key.n, &key.e)

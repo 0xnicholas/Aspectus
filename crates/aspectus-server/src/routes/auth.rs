@@ -9,8 +9,8 @@
 //! - `POST /forgot-password` — generate reset token (emails stub)
 //! - `POST /reset-password`  — verify token + update password
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use axum::http::HeaderMap;
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -20,8 +20,8 @@ use aspectus_auth::password::PasswordHasher;
 use aspectus_core::identity::IdentityType;
 use aspectus_core::store::{AuditLogStore, RefreshTokenStore};
 
-use crate::error::ProblemDetails;
 use crate::AppState;
+use crate::error::ProblemDetails;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -100,12 +100,12 @@ pub async fn login(
 
     // Validate client_id is a known project
     let client_id = login_req.client_id;
-    if client_id.parse::<aspectus_core::project::Project>().is_err() {
-        return ProblemDetails::validation_failed(
-            format!("Unknown project: {client_id}"),
-            vec![],
-        )
-        .into_response();
+    if client_id
+        .parse::<aspectus_core::project::Project>()
+        .is_err()
+    {
+        return ProblemDetails::validation_failed(format!("Unknown project: {client_id}"), vec![])
+            .into_response();
     }
 
     // Look up user by (tenant_id, email) — ADR-016.
@@ -124,13 +124,23 @@ pub async fn login(
                 Ok(true) => (id, tid),
                 _ => {
                     // Failed login — ambiguous message, no user/email leak
-                    return ProblemDetails::with_code_instance(aspectus_core::ErrorCode::InvalidCredentials, "Invalid email or password", "/login").into_response();
+                    return ProblemDetails::with_code_instance(
+                        aspectus_core::ErrorCode::InvalidCredentials,
+                        "Invalid email or password",
+                        "/login",
+                    )
+                    .into_response();
                 }
             }
         }
         Ok(None) => {
             // No such user — same ambiguous message
-            return ProblemDetails::with_code_instance(aspectus_core::ErrorCode::InvalidCredentials, "Invalid email or password", "/login").into_response();
+            return ProblemDetails::with_code_instance(
+                aspectus_core::ErrorCode::InvalidCredentials,
+                "Invalid email or password",
+                "/login",
+            )
+            .into_response();
         }
         Err(e) => {
             tracing::error!(
@@ -139,27 +149,34 @@ pub async fn login(
                 email_hash = %hex::encode(Sha256::digest(login_req.email.as_bytes())),
                 "User lookup failed"
             );
-            return ProblemDetails::internal_error("Authentication service temporarily unavailable").into_response();
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
         }
     };
 
     // Check if suspended
-    let is_suspended: bool = sqlx::query_scalar(
-        "SELECT is_suspended FROM users WHERE id = $1",
-    )
-    .bind(&user_id)
-    .fetch_one(&state.pool)
-    .await
-    .unwrap_or(false);
+    let is_suspended: bool = sqlx::query_scalar("SELECT is_suspended FROM users WHERE id = $1")
+        .bind(&user_id)
+        .fetch_one(&state.pool)
+        .await
+        .unwrap_or(false);
 
     if is_suspended {
         audit_auth_event(
-            &state, AuditAuthParams {
-                tenant_id: tenant_id.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
-                action: "user.login_blocked".into(), target_type: "user".into(), target_id: user_id.clone(),
+            &state,
+            AuditAuthParams {
+                tenant_id: tenant_id.clone(),
+                actor_id: user_id.clone(),
+                actor_type: IdentityType::User,
+                action: "user.login_blocked".into(),
+                target_type: "user".into(),
+                target_id: user_id.clone(),
                 metadata: serde_json::json!({"reason": "account_suspended", "ip": ip}),
             },
-        ).await;
+        )
+        .await;
         return ProblemDetails::unauthorized("Account is suspended", "/login").into_response();
     }
 
@@ -171,15 +188,23 @@ pub async fn login(
 
     // Audit: successful login
     audit_auth_event(
-        &state, AuditAuthParams {
-            tenant_id: tenant_id.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
-            action: "user.login".into(), target_type: "user".into(), target_id: user_id.clone(),
+        &state,
+        AuditAuthParams {
+            tenant_id: tenant_id.clone(),
+            actor_id: user_id.clone(),
+            actor_type: IdentityType::User,
+            action: "user.login".into(),
+            target_type: "user".into(),
+            target_id: user_id.clone(),
             metadata: serde_json::json!({"ip": ip, "client_id": client_id}),
         },
-    ).await;
+    )
+    .await;
 
     // Issue tokens
-    crate::routes::oauth::issue_tokens(&state, &user_id, &tenant_id, &client_id).await.into_response()
+    crate::routes::oauth::issue_tokens(&state, &user_id, &tenant_id, &client_id)
+        .await
+        .into_response()
 }
 
 // ── POST /register ─────────────────────────────────────────────
@@ -224,11 +249,12 @@ pub async fn register(
 
     // Validate client_id is a known project
     let client_id = reg.client_id.clone();
-    if client_id.parse::<aspectus_core::project::Project>().is_err() {
-        return ProblemDetails::validation_failed(
-            format!("Unknown project: {client_id}"),
-            vec![],
-        ).into_response();
+    if client_id
+        .parse::<aspectus_core::project::Project>()
+        .is_err()
+    {
+        return ProblemDetails::validation_failed(format!("Unknown project: {client_id}"), vec![])
+            .into_response();
     }
 
     // Validate email format
@@ -289,13 +315,12 @@ pub async fn register(
     //
     // If the tenant doesn't exist, return 404 with a clear message.
     let tenant_id = reg.tenant_id;
-    let tenant_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)",
-    )
-    .bind(&tenant_id)
-    .fetch_one(&state.pool)
-    .await
-    .unwrap_or(false);
+    let tenant_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)")
+            .bind(&tenant_id)
+            .fetch_one(&state.pool)
+            .await
+            .unwrap_or(false);
 
     if !tenant_exists {
         tracing::warn!(
@@ -304,13 +329,11 @@ pub async fn register(
             "Registration attempted against non-existent tenant. \
              This is expected for /register; in production use POST /users (Service Token)."
         );
-        return ProblemDetails::not_found(
-            format!(
-                "Tenant '{tenant_id}' does not exist. \
+        return ProblemDetails::not_found(format!(
+            "Tenant '{tenant_id}' does not exist. \
                  In production, ask an admin to create the tenant via `POST /tenants` \
                  (Service Token auth) before creating users."
-            ),
-        )
+        ))
         .into_response();
     }
 
@@ -319,7 +342,8 @@ pub async fn register(
         Ok(h) => h,
         Err(e) => {
             tracing::error!(error = %e, "Password hashing failed");
-            return ProblemDetails::internal_error("Failed to process registration").into_response();
+            return ProblemDetails::internal_error("Failed to process registration")
+                .into_response();
         }
     };
 
@@ -373,7 +397,8 @@ pub async fn register(
                 );
                 // Invalidate the scope expansion cache so the new role takes effect
                 // immediately on the access token we're about to issue.
-                crate::scope_expander::ScopeExpander::invalidate(&state.scope_cache, &user_id).await;
+                crate::scope_expander::ScopeExpander::invalidate(&state.scope_cache, &user_id)
+                    .await;
             }
             Err(e) => {
                 tracing::warn!(
@@ -394,15 +419,23 @@ pub async fn register(
 
     // Audit: registration
     audit_auth_event(
-        &state, AuditAuthParams {
-            tenant_id: tenant_id.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
-            action: "user.registered".into(), target_type: "user".into(), target_id: user_id.clone(),
+        &state,
+        AuditAuthParams {
+            tenant_id: tenant_id.clone(),
+            actor_id: user_id.clone(),
+            actor_type: IdentityType::User,
+            action: "user.registered".into(),
+            target_type: "user".into(),
+            target_id: user_id.clone(),
             metadata: serde_json::json!({"ip": ip, "email": reg.email}),
         },
-    ).await;
+    )
+    .await;
 
     // Auto-login: issue tokens
-    crate::routes::oauth::issue_tokens(&state, &user_id, &tenant_id, &client_id).await.into_response()
+    crate::routes::oauth::issue_tokens(&state, &user_id, &tenant_id, &client_id)
+        .await
+        .into_response()
 }
 
 // ── POST /logout ───────────────────────────────────────────────
@@ -434,9 +467,10 @@ pub async fn logout(
 
     // Revoke access token (JWT) if provided
     if let Some(access_token) = req.access_token
-        && access_token.starts_with("eyJ") {
-            state.jwt_verifier.revoke(&access_token).await;
-        }
+        && access_token.starts_with("eyJ")
+    {
+        state.jwt_verifier.revoke(&access_token).await;
+    }
 
     StatusCode::NO_CONTENT.into_response()
 }
@@ -474,7 +508,13 @@ pub async fn forgot_password(
         Ok(Some(u)) => u,
         _ => {
             // User not found — return success anyway to prevent enumeration
-            return (StatusCode::OK, Json(json!({"message": "If this email is registered, a reset link has been sent."}))).into_response();
+            return (
+                StatusCode::OK,
+                Json(
+                    json!({"message": "If this email is registered, a reset link has been sent."}),
+                ),
+            )
+                .into_response();
         }
     };
 
@@ -504,10 +544,12 @@ pub async fn forgot_password(
     // Send the reset email. The URL contains a one-time token; never expose
     // it in error responses. Delivery failures are logged but still return a
     // generic success message to prevent enumeration.
-    let reset_url = format!(
-        "https://aspectus.local/reset-password?token={token}"
-    );
-    if let Err(e) = state.email_sender.send_password_reset(&req.email, &reset_url).await {
+    let reset_url = format!("https://aspectus.local/reset-password?token={token}");
+    if let Err(e) = state
+        .email_sender
+        .send_password_reset(&req.email, &reset_url)
+        .await
+    {
         tracing::error!(
             user_id = %user_id,
             tenant_id = %tenant_id,
@@ -523,7 +565,11 @@ pub async fn forgot_password(
     }
 
     // Always return the same message
-    (StatusCode::OK, Json(json!({"message": "If this email is registered, a reset link has been sent."}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({"message": "If this email is registered, a reset link has been sent."})),
+    )
+        .into_response()
 }
 
 // ── POST /reset-password ───────────────────────────────────────
@@ -543,11 +589,8 @@ pub async fn reset_password(
 ) -> impl IntoResponse {
     // Validate password strength
     if req.new_password.len() < 8 {
-        return ProblemDetails::validation_failed(
-            "Password must be at least 8 characters",
-            vec![],
-        )
-        .into_response();
+        return ProblemDetails::validation_failed("Password must be at least 8 characters", vec![])
+            .into_response();
     }
 
     // Hash the incoming token to look it up
@@ -567,11 +610,8 @@ pub async fn reset_password(
     let user_id = match user_id {
         Some(id) => id,
         None => {
-            return ProblemDetails::validation_failed(
-                "Invalid or expired reset token",
-                vec![],
-            )
-            .into_response();
+            return ProblemDetails::validation_failed("Invalid or expired reset token", vec![])
+                .into_response();
         }
     };
 
@@ -585,36 +625,45 @@ pub async fn reset_password(
     };
 
     // Update password
-    if let Err(e) = sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
-        .bind(&password_hash)
-        .bind(&user_id)
-        .execute(&state.pool)
-        .await
+    if let Err(e) =
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+            .bind(&password_hash)
+            .bind(&user_id)
+            .execute(&state.pool)
+            .await
     {
         tracing::error!(error = %e, user_id = %user_id, "Password update failed");
         return ProblemDetails::internal_error("Failed to update password").into_response();
     }
 
     // Audit
-    let tenant_id: Option<String> = sqlx::query_scalar(
-        "SELECT tenant_id FROM users WHERE id = $1",
-    )
-    .bind(&user_id)
-    .fetch_optional(&state.pool)
-    .await
-    .unwrap_or(None);
+    let tenant_id: Option<String> = sqlx::query_scalar("SELECT tenant_id FROM users WHERE id = $1")
+        .bind(&user_id)
+        .fetch_optional(&state.pool)
+        .await
+        .unwrap_or(None);
 
     if let Some(tid) = tenant_id {
         audit_auth_event(
-            &state, AuditAuthParams {
-                tenant_id: tid.clone(), actor_id: user_id.clone(), actor_type: IdentityType::User,
-                action: "user.password_reset".into(), target_type: "user".into(), target_id: user_id.clone(),
+            &state,
+            AuditAuthParams {
+                tenant_id: tid.clone(),
+                actor_id: user_id.clone(),
+                actor_type: IdentityType::User,
+                action: "user.password_reset".into(),
+                target_type: "user".into(),
+                target_id: user_id.clone(),
                 metadata: serde_json::json!({"method": "email_reset_token"}),
             },
-        ).await;
+        )
+        .await;
     }
 
-    (StatusCode::OK, Json(json!({"message": "Password has been reset successfully."}))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({"message": "Password has been reset successfully."})),
+    )
+        .into_response()
 }
 
 // ── POST /login/lookup ─────────────────────────────────────
@@ -687,8 +736,10 @@ pub async fn login_lookup(
         Ok(rows) => rows,
         Err(e) => {
             tracing::error!(error = %e, "Login lookup query failed");
-            return ProblemDetails::internal_error("Authentication service temporarily unavailable")
-                .into_response();
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
         }
     };
 
@@ -750,7 +801,10 @@ mod tests {
         // must reject this before the handler is even called.
         let json = r#"{"email":"a@b.com","password":"secret123"}"#;
         let result: Result<LoginRequest, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "Login without tenant_id must fail to deserialize");
+        assert!(
+            result.is_err(),
+            "Login without tenant_id must fail to deserialize"
+        );
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("tenant_id") || err.contains("missing field"),
@@ -825,15 +879,24 @@ mod tests {
         let pd = ProblemDetails::not_found(
             "Tenant 'org-foo' does not exist. \
              In production, ask an admin to create the tenant via `POST /tenants` \
-             (Service Token auth) before creating users."
+             (Service Token auth) before creating users.",
         );
         let json = serde_json::to_value(&pd).unwrap();
         assert_eq!(json["status"], 404);
         assert_eq!(json["title"], "Not Found");
         let detail = json["detail"].as_str().unwrap();
-        assert!(detail.contains("org-foo"), "detail should mention tenant_id");
-        assert!(detail.contains("POST /tenants"), "detail should mention admin flow");
-        assert!(detail.contains("Service Token"), "detail should mention Service Token auth");
+        assert!(
+            detail.contains("org-foo"),
+            "detail should mention tenant_id"
+        );
+        assert!(
+            detail.contains("POST /tenants"),
+            "detail should mention admin flow"
+        );
+        assert!(
+            detail.contains("Service Token"),
+            "detail should mention Service Token auth"
+        );
     }
 
     // ── LogoutRequest ──
@@ -869,7 +932,10 @@ mod tests {
         // for users registered under multiple tenants.
         let json = r#"{"email":"a@b.com"}"#;
         let result: Result<ForgotPasswordRequest, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "Forgot password without tenant_id must fail to deserialize");
+        assert!(
+            result.is_err(),
+            "Forgot password without tenant_id must fail to deserialize"
+        );
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("tenant_id") || err.contains("missing field"),
@@ -912,8 +978,10 @@ mod tests {
         let json = serde_json::to_value(&opt).unwrap();
         assert_eq!(json["tenant_id"], "org_acme");
         assert_eq!(json["tenant_name"], "Acme Corp");
-        assert!(json.get("logo_url").is_none(),
-                "logo_url must be absent when None, got: {json}");
+        assert!(
+            json.get("logo_url").is_none(),
+            "logo_url must be absent when None, got: {json}"
+        );
     }
 
     #[test]
@@ -942,8 +1010,16 @@ mod tests {
         // Order should match the SQL ORDER BY t.name ASC.
         let resp = LoginLookupResponse {
             tenants: vec![
-                TenantOption { tenant_id: "t1".into(), tenant_name: "Acme Corp".into(), logo_url: None },
-                TenantOption { tenant_id: "t2".into(), tenant_name: "Foo Industries".into(), logo_url: None },
+                TenantOption {
+                    tenant_id: "t1".into(),
+                    tenant_name: "Acme Corp".into(),
+                    logo_url: None,
+                },
+                TenantOption {
+                    tenant_id: "t2".into(),
+                    tenant_name: "Foo Industries".into(),
+                    logo_url: None,
+                },
             ],
         };
         let json = serde_json::to_value(&resp).unwrap();
@@ -966,9 +1042,8 @@ mod tests {
     #[test]
     fn reset_password_rejects_short_password() {
         // Simulate the handler's validation
-        let req: ResetPasswordRequest = serde_json::from_str(
-            r#"{"token":"abc","new_password":"short"}"#
-        ).unwrap();
+        let req: ResetPasswordRequest =
+            serde_json::from_str(r#"{"token":"abc","new_password":"short"}"#).unwrap();
         assert!(req.new_password.len() < 8);
     }
 

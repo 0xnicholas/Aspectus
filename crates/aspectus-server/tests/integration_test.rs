@@ -43,7 +43,9 @@ async fn setup() -> (
 
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let redis_client = redis::Client::open(redis_url.as_str()).unwrap();
-    let cache = RedisCache::new(redis_client).await.expect("Redis connection failed");
+    let cache = RedisCache::new(redis_client)
+        .await
+        .expect("Redis connection failed");
 
     // Seed service token if not exists
     let _ = sqlx::query(
@@ -65,7 +67,15 @@ async fn setup() -> (
     let svc_store = Arc::new(PgServiceTokenStore::new(pool));
     let svc_verifier = ServiceTokenVerifier::new(svc_store, cache);
 
-    (tenant_store, sa_store, api_key_store, audit_store, creator, verifier, svc_verifier)
+    (
+        tenant_store,
+        sa_store,
+        api_key_store,
+        audit_store,
+        creator,
+        verifier,
+        svc_verifier,
+    )
 }
 
 #[tokio::test]
@@ -80,7 +90,10 @@ async fn full_introspect_flow() {
     assert_eq!(project, Some(Project::Pandaria));
 
     // Create tenant
-    let tenant = tenant_store.create("integration-test-tenant").await.unwrap();
+    let tenant = tenant_store
+        .create("integration-test-tenant")
+        .await
+        .unwrap();
     assert!(!tenant.id.is_empty());
 
     // Create SA
@@ -107,19 +120,24 @@ async fn full_introspect_flow() {
     let response = verifier.verify(&created.key).await;
     assert!(response.active);
     assert_eq!(response.tenant_id.as_deref(), Some(tenant.id.as_str()));
-    assert_eq!(
-        response.identity_type,
-        Some(IdentityType::ServiceAccount)
-    );
+    assert_eq!(response.identity_type, Some(IdentityType::ServiceAccount));
     assert_eq!(response.client_id.as_deref(), Some("pandaria"));
-    assert!(response.scope.as_deref().unwrap().contains("pandaria:session:create"));
+    assert!(
+        response
+            .scope
+            .as_deref()
+            .unwrap()
+            .contains("pandaria:session:create")
+    );
 
     // Revoke + invalidate cache
     let revoked = api_key_store.revoke(&created.id).await.unwrap();
     assert!(revoked);
 
     // Invalidate cache (in production this happens in the HTTP handler)
-    let hash = hex::encode(Sha256::digest(hex::decode(created.key.strip_prefix("pk_live_").unwrap()).unwrap()));
+    let hash = hex::encode(Sha256::digest(
+        hex::decode(created.key.strip_prefix("pk_live_").unwrap()).unwrap(),
+    ));
     verifier.invalidate_cache(&hash).await;
 
     // Introspect — inactive
@@ -130,7 +148,9 @@ async fn full_introspect_flow() {
 #[tokio::test]
 async fn unknown_key_returns_inactive() {
     let (_ts, _ss, _as, _al, _cr, verifier, _sv) = setup().await;
-    let response = verifier.verify("pk_live_nonexistentkey1234567890abcdef").await;
+    let response = verifier
+        .verify("pk_live_nonexistentkey1234567890abcdef")
+        .await;
     assert!(!response.active);
 }
 
@@ -153,7 +173,10 @@ async fn audit_log_appended() {
     let (tenant_store, _ss, _as, audit_store, _cr, _sv, _svc) = setup().await;
     let tenant = tenant_store.create("audit-tenant").await.unwrap();
     let entry = AuditLog {
-        id: format!("audit-{:06}", (Utc::now().timestamp_millis() % 1_000_000).abs()),
+        id: format!(
+            "audit-{:06}",
+            (Utc::now().timestamp_millis() % 1_000_000).abs()
+        ),
         tenant_id: tenant.id,
         actor_id: "mgmt".into(),
         actor_type: IdentityType::ServiceAccount,
@@ -170,10 +193,7 @@ async fn audit_log_appended() {
 async fn cache_hit_on_repeat_introspect() {
     let (tenant_store, sa_store, _as, _al, creator, verifier, _sv) = setup().await;
 
-    let tenant = tenant_store
-        .create("cache-test-tenant")
-        .await
-        .unwrap();
+    let tenant = tenant_store.create("cache-test-tenant").await.unwrap();
     let sa = sa_store
         .create(&tenant.id, "cache-test-sa", None)
         .await

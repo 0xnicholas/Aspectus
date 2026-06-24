@@ -1,4 +1,4 @@
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -6,8 +6,8 @@ use sha2::{Digest, Sha256};
 use aspectus_core::identity::IdentityType;
 use aspectus_core::project::Project;
 
-use crate::error::ProblemDetails;
 use crate::AppState;
+use crate::error::ProblemDetails;
 use aspectus_core::store::ApiKeyStore;
 
 #[derive(Deserialize)]
@@ -48,31 +48,53 @@ pub async fn issue(
     match req.token_format.as_str() {
         "jwt" => {
             let ttl: u64 = std::env::var("JWT_TTL_SECONDS")
-                .ok().and_then(|s| s.parse().ok()).unwrap_or(900);
-            match state.jwt_signer.sign(&req.client_id, &tenant_id, project, &scopes, IdentityType::ServiceAccount, ttl) {
-                Ok(token) => (StatusCode::OK, Json(json!({
-                    "access_token": token, "token_format": "jwt",
-                    "expires_in": ttl, "token_type": "Bearer"
-                }))).into_response(),
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(900);
+            match state.jwt_signer.sign(
+                &req.client_id,
+                &tenant_id,
+                project,
+                &scopes,
+                IdentityType::ServiceAccount,
+                ttl,
+            ) {
+                Ok(token) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "access_token": token, "token_format": "jwt",
+                        "expires_in": ttl, "token_type": "Bearer"
+                    })),
+                )
+                    .into_response(),
                 Err(e) => ProblemDetails::from(e).into_response(),
             }
         }
         "opaque" => {
             let ttl: u64 = std::env::var("OPAQUE_TOKEN_TTL_SECONDS")
-                .ok().and_then(|s| s.parse().ok()).unwrap_or(3600);
-            match state.api_key_creator.create_opaque(
-                &tenant_id, &req.client_id, project, &scopes, ttl,
-            ).await {
-                Ok(token) => (StatusCode::OK, Json(json!({
-                    "access_token": token.key, "token_format": "opaque",
-                    "expires_in": ttl, "token_type": "Bearer"
-                }))).into_response(),
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(3600);
+            match state
+                .api_key_creator
+                .create_opaque(&tenant_id, &req.client_id, project, &scopes, ttl)
+                .await
+            {
+                Ok(token) => (
+                    StatusCode::OK,
+                    Json(json!({
+                        "access_token": token.key, "token_format": "opaque",
+                        "expires_in": ttl, "token_type": "Bearer"
+                    })),
+                )
+                    .into_response(),
                 Err(e) => ProblemDetails::from(e).into_response(),
             }
         }
-        other => ProblemDetails::validation_failed(
-            format!("Unsupported token_format: {other}"), vec![],
-        ).into_response(),
+        other => {
+            ProblemDetails::validation_failed(format!("Unsupported token_format: {other}"), vec![])
+                .into_response()
+        }
     }
 }
 

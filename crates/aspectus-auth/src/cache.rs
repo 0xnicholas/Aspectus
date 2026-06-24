@@ -1,6 +1,6 @@
 use anyhow::Context;
 use redis::aio::ConnectionManager;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// Thin async wrapper around Redis ConnectionManager.
 ///
@@ -55,11 +55,7 @@ impl RedisCache {
     /// Get a plain Redis string value.
     pub async fn get(&self, key: &str) -> Option<String> {
         let mut conn = self.conn();
-        redis::cmd("GET")
-            .arg(key)
-            .query_async(&mut conn)
-            .await
-            .ok()
+        redis::cmd("GET").arg(key).query_async(&mut conn).await.ok()
     }
 
     /// Set a plain Redis string value with TTL (seconds).

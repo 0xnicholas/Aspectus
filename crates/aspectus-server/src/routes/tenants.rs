@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -14,9 +14,9 @@ use aspectus_core::{
     store::{AuditLogStore, TenantStore},
 };
 
+use crate::AppState;
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
-use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct CreateTenantRequest {
@@ -30,28 +30,39 @@ pub async fn create(
     // Validate tenant name: non-empty, ≤128 chars, [a-zA-Z0-9_-] only
     if req.name.is_empty() || req.name.len() > 128 {
         return ProblemDetails::validation_failed(
-            "Tenant name must be between 1 and 128 characters", vec![],
-        ).into_response();
+            "Tenant name must be between 1 and 128 characters",
+            vec![],
+        )
+        .into_response();
     }
-    if !req.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+    if !req
+        .name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         return ProblemDetails::validation_failed(
-            "Tenant name may only contain letters, numbers, underscore, and hyphen", vec![],
-        ).into_response();
+            "Tenant name may only contain letters, numbers, underscore, and hyphen",
+            vec![],
+        )
+        .into_response();
     }
 
     match state.tenant_store.create(&req.name).await {
         Ok(tenant) => {
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(),
-                tenant_id: tenant.id.clone(),
-                actor_id: "mgmt".into(),
-                actor_type: IdentityType::ServiceAccount,
-                action: "tenant.created".into(),
-                target_type: "tenant".into(),
-                target_id: tenant.id.clone(),
-                metadata: json!({"name": &req.name}),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: tenant.id.clone(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "tenant.created".into(),
+                    target_type: "tenant".into(),
+                    target_id: tenant.id.clone(),
+                    metadata: json!({"name": &req.name}),
+                    created_at: Utc::now(),
+                })
+                .await;
 
             (StatusCode::CREATED, Json(tenant)).into_response()
         }
@@ -59,10 +70,7 @@ pub async fn create(
     }
 }
 
-pub async fn get(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     match state.tenant_store.get_by_id(&id).await {
         Ok(Some(tenant)) => Json(tenant).into_response(),
         Ok(None) => ProblemDetails::not_found(format!("Tenant {id} not found")).into_response(),
@@ -85,26 +93,27 @@ pub async fn update_quotas(
     Path(id): Path<String>,
     Json(quotas): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    match sqlx::query(
-        "UPDATE tenants SET quotas = $1 WHERE id = $2",
-    )
-    .bind(&quotas)
-    .bind(&id)
-    .execute(&state.pool)
-    .await
+    match sqlx::query("UPDATE tenants SET quotas = $1 WHERE id = $2")
+        .bind(&quotas)
+        .bind(&id)
+        .execute(&state.pool)
+        .await
     {
         Ok(result) if result.rows_affected() > 0 => {
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(),
-                tenant_id: id.clone(),
-                actor_id: "mgmt".into(),
-                actor_type: IdentityType::ServiceAccount,
-                action: "quota.updated".into(),
-                target_type: "tenant".into(),
-                target_id: id,
-                metadata: json!({"quotas": &quotas}),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: id.clone(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "quota.updated".into(),
+                    target_type: "tenant".into(),
+                    target_id: id,
+                    metadata: json!({"quotas": &quotas}),
+                    created_at: Utc::now(),
+                })
+                .await;
 
             StatusCode::NO_CONTENT.into_response()
         }

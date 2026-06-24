@@ -4,8 +4,8 @@
 //! configure SMTP; development and tests can use the logging transport.
 
 use async_trait::async_trait;
-use lettre::{AsyncTransport, Message};
 use lettre::message::Mailbox;
+use lettre::{AsyncTransport, Message};
 
 /// Sends transactional emails to users.
 #[async_trait]
@@ -52,19 +52,19 @@ impl SmtpEmailSender {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(587);
-        let username = std::env::var("ASPECTUS_SMTP_USERNAME")
-            .map_err(|_| anyhow::anyhow!("ASPECTUS_SMTP_USERNAME is required for SMTP transport"))?;
-        let password = std::env::var("ASPECTUS_SMTP_PASSWORD")
-            .map_err(|_| anyhow::anyhow!("ASPECTUS_SMTP_PASSWORD is required for SMTP transport"))?;
+        let username = std::env::var("ASPECTUS_SMTP_USERNAME").map_err(|_| {
+            anyhow::anyhow!("ASPECTUS_SMTP_USERNAME is required for SMTP transport")
+        })?;
+        let password = std::env::var("ASPECTUS_SMTP_PASSWORD").map_err(|_| {
+            anyhow::anyhow!("ASPECTUS_SMTP_PASSWORD is required for SMTP transport")
+        })?;
         let from: Mailbox = std::env::var("ASPECTUS_EMAIL_FROM")
             .unwrap_or_else(|_| "Aspectus <noreply@aspectus.local>".into())
             .parse()
             .map_err(|e| anyhow::anyhow!("Invalid ASPECTUS_EMAIL_FROM: {e}"))?;
 
-        let credentials = lettre::transport::smtp::authentication::Credentials::new(
-            username,
-            password,
-        );
+        let credentials =
+            lettre::transport::smtp::authentication::Credentials::new(username, password);
         let transport = lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::starttls_relay(&host)
             .map_err(|e| anyhow::anyhow!("Invalid SMTP relay: {e}"))?
             .port(port)

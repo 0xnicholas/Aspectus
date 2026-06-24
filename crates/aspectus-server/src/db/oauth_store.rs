@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
 use aspectus_core::error::CoreError;
-use aspectus_core::store::{AuthorizationCodeStore, RefreshTokenStore, OAuth2ClientStore};
+use aspectus_core::store::{AuthorizationCodeStore, OAuth2ClientStore, RefreshTokenStore};
 
 pub struct PgAuthorizationCodeStore {
     pool: PgPool,
@@ -202,7 +202,7 @@ impl OAuth2ClientStore for PgOAuth2ClientStore {
         .map_err(|e| CoreError::Internal(e.to_string()))?;
 
         match row {
-            None => Ok(false), // unknown client
+            None => Ok(false),      // unknown client
             Some(None) => Ok(true), // no secret configured — backward compat
             Some(Some(stored_hash)) => {
                 let provided_hash = hex::encode(Sha256::digest(client_secret.as_bytes()));

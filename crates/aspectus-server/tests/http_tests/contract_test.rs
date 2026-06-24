@@ -64,7 +64,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use crate::common;
@@ -75,7 +75,8 @@ use crate::common;
 
 async fn create_tenant(app: &axum::Router, name: &str) -> String {
     let req = Request::builder()
-        .uri("/tenants").method("POST")
+        .uri("/tenants")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({ "name": name }).to_string()))
@@ -89,16 +90,24 @@ async fn create_tenant(app: &axum::Router, name: &str) -> String {
 
 async fn create_service_account(app: &axum::Router, tenant_id: &str, label: &str) -> String {
     let req = Request::builder()
-        .uri("/service-accounts").method("POST")
+        .uri("/service-accounts")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": tenant_id,
-            "label": label,
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": tenant_id,
+                "label": label,
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::CREATED, "create_service_account failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::CREATED,
+        "create_service_account failed"
+    );
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
     let sa: Value = serde_json::from_slice(&body).unwrap();
     sa["id"].as_str().unwrap().to_string()
@@ -111,14 +120,18 @@ async fn create_api_key(
     scopes: &[&str],
 ) -> (String, String) {
     let req = Request::builder()
-        .uri("/api-keys").method("POST")
+        .uri("/api-keys")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "service_account_id": service_account_id,
-            "project": project,
-            "scopes": scopes,
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "service_account_id": service_account_id,
+                "project": project,
+                "scopes": scopes,
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED, "create_api_key failed");
@@ -137,7 +150,11 @@ async fn revoke_api_key(app: &axum::Router, key_id: &str) {
         .body(Body::empty())
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "revoke_api_key failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::NO_CONTENT,
+        "revoke_api_key failed"
+    );
 }
 
 async fn set_tenant_quotas(app: &axum::Router, tenant_id: &str, quotas: Value) {
@@ -149,12 +166,17 @@ async fn set_tenant_quotas(app: &axum::Router, tenant_id: &str, quotas: Value) {
         .body(Body::from(quotas.to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NO_CONTENT, "set_tenant_quotas failed");
+    assert_eq!(
+        resp.status(),
+        StatusCode::NO_CONTENT,
+        "set_tenant_quotas failed"
+    );
 }
 
 async fn post_introspect(app: &axum::Router, token: &str) -> (StatusCode, Value, String) {
     let req = Request::builder()
-        .uri("/introspect").method("POST")
+        .uri("/introspect")
+        .method("POST")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(format!("token={token}")))
@@ -173,10 +195,13 @@ async fn post_introspect(app: &axum::Router, token: &str) -> (StatusCode, Value,
     // Strict JSON Schema validation — catches silent field additions
     // (additionalProperties: false) and missing required fields when active=true.
     // This complements the snapshot tests, which catch value-level changes.
-    if status == StatusCode::OK && content_type.starts_with("application/json") && json.is_object() {
+    if status == StatusCode::OK && content_type.starts_with("application/json") && json.is_object()
+    {
         let validator = introspect_schema();
         if let Err(errors) = validator.validate(&json) {
-            let msgs: Vec<String> = errors.map(|e| format!("  - at `{}`: {}", e.instance_path, e)).collect();
+            let msgs: Vec<String> = errors
+                .map(|e| format!("  - at `{}`: {}", e.instance_path, e))
+                .collect();
             panic!(
                 "IntrospectResponse failed strict schema validation:\n{}\n\nactual JSON: {}",
                 msgs.join("\n"),
@@ -274,7 +299,8 @@ async fn introspect_active_api_key_contract() {
         &sa_id,
         "pandaria",
         &["pandaria:session:create", "pandaria:session:read"],
-    ).await;
+    )
+    .await;
 
     let (status, body, content_type) = post_introspect(&app, &api_key).await;
 
@@ -288,7 +314,10 @@ async fn introspect_active_api_key_contract() {
     // Required field shape (validated separately from snapshot)
     assert_eq!(body["active"], true);
     assert!(body["tenant_id"].is_string());
-    assert!(body["user_id"].is_string(), "service_accounts must expose user_id (SA id)");
+    assert!(
+        body["user_id"].is_string(),
+        "service_accounts must expose user_id (SA id)"
+    );
     assert_eq!(body["identity_type"], "service_account");
     assert_eq!(body["client_id"], "pandaria");
     assert_eq!(
@@ -297,7 +326,10 @@ async fn introspect_active_api_key_contract() {
     );
     assert_eq!(body["token_type"], "Bearer");
     assert_eq!(body["token_format"], "api_key");
-    assert!(body["exp"].is_null(), "API keys have no exp; must be omitted or null");
+    assert!(
+        body["exp"].is_null(),
+        "API keys have no exp; must be omitted or null"
+    );
     assert!(
         body["quotas"].is_null() || body["quotas"] == json!({}),
         "no quotas set on this tenant; must be omitted or empty",
@@ -322,7 +354,8 @@ async fn introspect_revoked_api_key_contract() {
     let (app, _) = common::build_app().await.unwrap();
     let tenant_id = create_tenant(&app, "contract-revoked").await;
     let sa_id = create_service_account(&app, &tenant_id, "revoked-sa").await;
-    let (api_key, key_id) = create_api_key(&app, &sa_id, "pandaria", &["pandaria:session:create"]).await;
+    let (api_key, key_id) =
+        create_api_key(&app, &sa_id, "pandaria", &["pandaria:session:create"]).await;
 
     // Verify it's active before revoking
     let (s, body, _) = post_introspect(&app, &api_key).await;
@@ -337,11 +370,19 @@ async fn introspect_revoked_api_key_contract() {
     let (status, body, content_type) = post_introspect(&app, &api_key).await;
 
     // Header contract
-    assert_eq!(status, StatusCode::OK, "RFC 7662: inactive tokens still return HTTP 200");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "RFC 7662: inactive tokens still return HTTP 200"
+    );
     assert!(content_type.starts_with("application/json"));
 
     // RFC 7662 §2.2: only `active: false` is allowed
-    assert_eq!(body, json!({ "active": false }), "inactive response must be EXACTLY {{active: false}}");
+    assert_eq!(
+        body,
+        json!({ "active": false }),
+        "inactive response must be EXACTLY {{active: false}}"
+    );
 
     insta::assert_json_snapshot!("introspect_revoked_api_key", body);
 }
@@ -397,7 +438,8 @@ async fn introspect_active_with_quotas_contract() {
                 "monthly_tokens": 10_000_000,
             }
         }),
-    ).await;
+    )
+    .await;
 
     let (status, body, content_type) = post_introspect(&app, &api_key).await;
 
@@ -420,7 +462,8 @@ async fn introspect_active_with_quotas_contract() {
 async fn introspect_missing_service_token_returns_problem_details() {
     let (app, _) = common::build_app().await.unwrap();
     let req = Request::builder()
-        .uri("/introspect").method("POST")
+        .uri("/introspect")
+        .method("POST")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .body(Body::from("token=pk_live_anything"))
         .unwrap();
@@ -448,7 +491,8 @@ async fn introspect_missing_service_token_returns_problem_details() {
 async fn introspect_wrong_service_token_returns_problem_details() {
     let (app, _) = common::build_app().await.unwrap();
     let req = Request::builder()
-        .uri("/introspect").method("POST")
+        .uri("/introspect")
+        .method("POST")
         .header("Content-Type", "application/x-www-form-urlencoded")
         .header("Authorization", "Bearer this-is-not-the-real-service-token")
         .body(Body::from("token=pk_live_anything"))
@@ -517,8 +561,10 @@ fn schema_rejects_unknown_field() {
         "active": false,
         "secret_token_hash_leaked": "should-never-appear"
     });
-    assert!(v.validate(&bad).is_err(),
-        "schema must reject unknown fields (additionalProperties: false)");
+    assert!(
+        v.validate(&bad).is_err(),
+        "schema must reject unknown fields (additionalProperties: false)"
+    );
 }
 
 #[test]
@@ -529,26 +575,39 @@ fn schema_rejects_missing_required_fields_when_active() {
         // tenant_id, user_id, identity_type, client_id, scope, token_type, token_format missing
     });
     let errors: Vec<_> = v.validate(&bad).unwrap_err().collect();
-    assert!(!errors.is_empty(), "schema must reject active=true without required fields");
-    let err_text: String = errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("\n");
-    assert!(err_text.contains("tenant_id") || err_text.contains("required"),
-        "error should mention missing required fields, got: {err_text}");
+    assert!(
+        !errors.is_empty(),
+        "schema must reject active=true without required fields"
+    );
+    let err_text: String = errors
+        .iter()
+        .map(|e| e.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        err_text.contains("tenant_id") || err_text.contains("required"),
+        "error should mention missing required fields, got: {err_text}"
+    );
 }
 
 #[test]
 fn schema_rejects_wrong_active_type() {
     let v = introspect_schema();
     let bad = serde_json::json!({"active": "true"}); // string, not bool
-    assert!(v.validate(&bad).is_err(),
-        "schema must reject `active` as non-boolean");
+    assert!(
+        v.validate(&bad).is_err(),
+        "schema must reject `active` as non-boolean"
+    );
 }
 
 #[test]
 fn schema_accepts_valid_inactive_response() {
     let v = introspect_schema();
     let good = serde_json::json!({"active": false});
-    assert!(v.validate(&good).is_ok(),
-        "schema must accept minimal {{active: false}}");
+    assert!(
+        v.validate(&good).is_ok(),
+        "schema must accept minimal {{active: false}}"
+    );
 }
 
 #[test]
@@ -564,8 +623,10 @@ fn schema_accepts_valid_active_response() {
         "token_type": "Bearer",
         "token_format": "api_key"
     });
-    assert!(v.validate(&good).is_ok(),
-        "schema must accept full active response");
+    assert!(
+        v.validate(&good).is_ok(),
+        "schema must accept full active response"
+    );
 }
 
 // ────────────────────────────────────────────────────────────────────────
@@ -578,7 +639,6 @@ fn schema_accepts_valid_active_response() {
 
 #[tokio::test]
 async fn introspect_active_jwt_contract() {
-    
     use aspectus_core::identity::IdentityType;
     use aspectus_core::project::Project;
 
@@ -587,8 +647,9 @@ async fn introspect_active_jwt_contract() {
     let sa_id = create_service_account(&app.router, &tenant_id, "jwt-sa").await;
 
     // Sign a JWT mimicking what /oauth/token would produce.
-    let jwt = app.jwt_signer.sign_with_tenant_name(
-        aspectus_auth::jwt::JwtSignRequest {
+    let jwt = app
+        .jwt_signer
+        .sign_with_tenant_name(aspectus_auth::jwt::JwtSignRequest {
             sub: sa_id.clone(),
             tenant_id: tenant_id.clone(),
             tenant_name: None,
@@ -596,8 +657,8 @@ async fn introspect_active_jwt_contract() {
             scopes: "pandaria:session:create pandaria:session:read".to_string(),
             identity_type: IdentityType::ServiceAccount,
             ttl_seconds: 900,
-        }
-    ).expect("sign JWT");
+        })
+        .expect("sign JWT");
 
     let (status, body, content_type) = post_introspect(&app.router, &jwt).await;
     assert_eq!(status, StatusCode::OK);
@@ -608,9 +669,18 @@ async fn introspect_active_jwt_contract() {
     assert_eq!(body["identity_type"], "service_account");
     assert_eq!(body["client_id"], "pandaria");
     assert_eq!(body["token_type"], "Bearer");
-    assert_eq!(body["token_format"], "jwt", "JWT tokens must report token_format=\"jwt\"");
-    assert!(body["exp"].is_i64(), "JWT must include exp (expiry as Unix seconds)");
-    assert_eq!(body["scope"], "pandaria:session:create pandaria:session:read");
+    assert_eq!(
+        body["token_format"], "jwt",
+        "JWT tokens must report token_format=\"jwt\""
+    );
+    assert!(
+        body["exp"].is_i64(),
+        "JWT must include exp (expiry as Unix seconds)"
+    );
+    assert_eq!(
+        body["scope"],
+        "pandaria:session:create pandaria:session:read"
+    );
     // tenant_id and user_id are checked separately as they vary per run
     assert!(body["tenant_id"].is_string());
     assert!(body["user_id"].is_string());
@@ -647,14 +717,21 @@ async fn introspect_active_opaque_contract() {
     let sa_id = create_service_account(&app.router, &tenant_id, "opaque-sa").await;
 
     // Mint an Opaque token (ot_* prefix) directly via the creator.
-    let created = app.api_key_creator.create_opaque(
-        &tenant_id,
-        &sa_id,
-        Project::Pandaria,
-        "pandaria:session:create pandaria:session:read",
-        3600, // 1h TTL
-    ).await.expect("create_opaque");
-    assert!(created.key.starts_with("ot_"), "Opaque token must have ot_ prefix");
+    let created = app
+        .api_key_creator
+        .create_opaque(
+            &tenant_id,
+            &sa_id,
+            Project::Pandaria,
+            "pandaria:session:create pandaria:session:read",
+            3600, // 1h TTL
+        )
+        .await
+        .expect("create_opaque");
+    assert!(
+        created.key.starts_with("ot_"),
+        "Opaque token must have ot_ prefix"
+    );
 
     let (status, body, content_type) = post_introspect(&app.router, &created.key).await;
     assert_eq!(status, StatusCode::OK);
@@ -664,9 +741,18 @@ async fn introspect_active_opaque_contract() {
     assert_eq!(body["identity_type"], "service_account");
     assert_eq!(body["client_id"], "pandaria");
     assert_eq!(body["token_type"], "Bearer");
-    assert_eq!(body["token_format"], "opaque", "Opaque tokens must report token_format=\"opaque\"");
-    assert!(body["exp"].is_i64(), "Opaque tokens with TTL must include exp");
-    assert_eq!(body["scope"], "pandaria:session:create pandaria:session:read");
+    assert_eq!(
+        body["token_format"], "opaque",
+        "Opaque tokens must report token_format=\"opaque\""
+    );
+    assert!(
+        body["exp"].is_i64(),
+        "Opaque tokens with TTL must include exp"
+    );
+    assert_eq!(
+        body["scope"],
+        "pandaria:session:create pandaria:session:read"
+    );
     assert!(body["tenant_id"].is_string());
     assert!(body["user_id"].is_string());
 
@@ -693,9 +779,8 @@ async fn introspect_active_opaque_contract() {
 
 #[tokio::test]
 async fn introspect_expired_jwt_contract() {
-    
     use aspectus_core::project::Project;
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use jsonwebtoken::{EncodingKey, Header, encode};
     use sha2::Digest as _;
     use sha2::Sha256;
 
@@ -718,7 +803,10 @@ async fn introspect_expired_jwt_contract() {
         iss: "https://aspectus".to_string(),
         iat: (now - 7200) as usize, // 2h ago
         exp: (now - 3600) as usize, // expired 1h ago (well past the 60s leeway)
-        jti: format!("expired-{}", hex::encode(Sha256::digest(tenant_id.as_bytes()))),
+        jti: format!(
+            "expired-{}",
+            hex::encode(Sha256::digest(tenant_id.as_bytes()))
+        ),
     };
     let pem_bytes = std::fs::read(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -726,12 +814,14 @@ async fn introspect_expired_jwt_contract() {
             .join("aspectus-auth")
             .join("src")
             .join("test_private.pem"),
-    ).expect("read test private key");
+    )
+    .expect("read test private key");
     let jwt = encode(
         &Header::new(jsonwebtoken::Algorithm::RS256),
         &claims,
         &EncodingKey::from_rsa_pem(&pem_bytes).expect("encoding key"),
-    ).expect("sign expired JWT");
+    )
+    .expect("sign expired JWT");
 
     let (status, body, content_type) = post_introspect(&app.router, &jwt).await;
     assert_eq!(status, StatusCode::OK, "RFC 7662: expired = 200, not 401");
@@ -768,7 +858,10 @@ async fn jwks_endpoint_contract() {
 
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
     let jwks: Value = serde_json::from_slice(&body).unwrap();
-    assert!(jwks.get("keys").is_some(), "JWKS must contain a 'keys' array");
+    assert!(
+        jwks.get("keys").is_some(),
+        "JWKS must contain a 'keys' array"
+    );
     let keys = jwks["keys"].as_array().expect("keys must be an array");
     assert!(!keys.is_empty(), "JWKS must contain at least one key");
 
@@ -795,11 +888,14 @@ async fn create_user(app: &axum::Router, tenant_id: &str, email: &str, password:
         .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": tenant_id,
-            "email": email,
-            "password": password,
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": tenant_id,
+                "email": email,
+                "password": password,
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED, "create_user failed");
@@ -814,12 +910,18 @@ async fn cross_tenant_login_isolation_contract() {
     let tenant_a = create_tenant(&app.router, "contract-isolation-a").await;
     let tenant_b = create_tenant(&app.router, "contract-isolation-b").await;
 
-    let email = format!("isolation-{}@test.com", chrono::Utc::now().timestamp_millis());
+    let email = format!(
+        "isolation-{}@test.com",
+        chrono::Utc::now().timestamp_millis()
+    );
     let password = "isolation-pass-123";
 
     let user_a = create_user(&app.router, &tenant_a, &email, password).await;
     let user_b = create_user(&app.router, &tenant_b, &email, password).await;
-    assert_ne!(user_a, user_b, "Users in different tenants must have distinct ids");
+    assert_ne!(
+        user_a, user_b,
+        "Users in different tenants must have distinct ids"
+    );
 
     // Step 1: /login/lookup returns both tenants for the same email.
     let req = Request::builder()
@@ -847,11 +949,14 @@ async fn cross_tenant_login_isolation_contract() {
         .uri("/login")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": email,
-            "password": password,
-            "tenant_id": tenant_a,
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": email,
+                "password": password,
+                "tenant_id": tenant_a,
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -866,10 +971,13 @@ async fn cross_tenant_login_isolation_contract() {
         .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "name": "isolation-client",
-            "redirect_uris": ["https://example.com/cb"],
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "name": "isolation-client",
+                "redirect_uris": ["https://example.com/cb"],
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -882,13 +990,16 @@ async fn cross_tenant_login_isolation_contract() {
         .uri("/authorize")
         .method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({
-            "email": email,
-            "password": password,
-            "tenant_id": "nonexistent-tenant",
-            "client_id": client_id,
-            "redirect_uri": "https://example.com/cb",
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "email": email,
+                "password": password,
+                "tenant_id": "nonexistent-tenant",
+                "client_id": client_id,
+                "redirect_uri": "https://example.com/cb",
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);

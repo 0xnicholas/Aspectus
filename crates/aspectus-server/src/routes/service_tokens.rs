@@ -5,26 +5,26 @@
 //! ecosystem projects use to call `POST /introspect`.
 
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use aspectus_auth::{CreatedServiceToken, ServiceTokenCreator};
 use aspectus_core::{
     audit_log::AuditLog,
     identity::IdentityType,
     project::Project,
     store::{AuditLogStore, ServiceTokenStore},
 };
-use aspectus_auth::{CreatedServiceToken, ServiceTokenCreator};
 
+use crate::AppState;
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
-use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct CreateServiceTokenRequest {
@@ -83,11 +83,10 @@ impl From<&CreatedServiceToken> for ServiceTokenCreatedResponse {
 fn parse_project(project: &str) -> Result<Project, axum::response::Response> {
     match project.parse() {
         Ok(p) => Ok(p),
-        Err(e) => Err(ProblemDetails::validation_failed(
-            format!("Invalid project: {e}"),
-            vec![],
-        )
-        .into_response()),
+        Err(e) => Err(
+            ProblemDetails::validation_failed(format!("Invalid project: {e}"), vec![])
+                .into_response(),
+        ),
     }
 }
 
@@ -154,10 +153,7 @@ pub async fn list(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-pub async fn get(
-    State(state): State<AppState>,
-    Path(project): Path<String>,
-) -> impl IntoResponse {
+pub async fn get(State(state): State<AppState>, Path(project): Path<String>) -> impl IntoResponse {
     let project = match parse_project_param(&project) {
         Ok(p) => p,
         Err(pd) => return pd.into_response(),
@@ -167,9 +163,13 @@ pub async fn get(
     }
 
     match state.service_token_store.get_by_project(&project).await {
-        Ok(Some(token)) => (StatusCode::OK, Json(ServiceTokenMetadata::from(&token))).into_response(),
-        Ok(None) => ProblemDetails::not_found(format!("Service token for project {project} not found"))
-            .into_response(),
+        Ok(Some(token)) => {
+            (StatusCode::OK, Json(ServiceTokenMetadata::from(&token))).into_response()
+        }
+        Ok(None) => {
+            ProblemDetails::not_found(format!("Service token for project {project} not found"))
+                .into_response()
+        }
         Err(e) => {
             tracing::error!(error = %e, project = %project, "Failed to get service token");
             ProblemDetails::internal_error("Failed to get service token").into_response()
@@ -200,7 +200,8 @@ pub async fn create(
         Ok(_) => {}
         Err(e) => {
             tracing::error!(error = %e, project = %project, "Failed to check existing service token");
-            return ProblemDetails::internal_error("Failed to check existing service token").into_response();
+            return ProblemDetails::internal_error("Failed to check existing service token")
+                .into_response();
         }
     }
 
@@ -222,7 +223,11 @@ pub async fn create(
                 json!({"token_prefix": &created.token_prefix}),
             )
             .await;
-            (StatusCode::CREATED, Json(ServiceTokenCreatedResponse::from(&created))).into_response()
+            (
+                StatusCode::CREATED,
+                Json(ServiceTokenCreatedResponse::from(&created)),
+            )
+                .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, project = %project, "Failed to persist service token");
@@ -253,7 +258,8 @@ pub async fn rotate(
         }
         Err(e) => {
             tracing::error!(error = %e, project = %project, "Failed to look up service token");
-            return ProblemDetails::internal_error("Failed to look up service token").into_response();
+            return ProblemDetails::internal_error("Failed to look up service token")
+                .into_response();
         }
     };
 
@@ -281,7 +287,11 @@ pub async fn rotate(
                 json!({"token_prefix": &created.token_prefix}),
             )
             .await;
-            (StatusCode::OK, Json(ServiceTokenCreatedResponse::from(&created))).into_response()
+            (
+                StatusCode::OK,
+                Json(ServiceTokenCreatedResponse::from(&created)),
+            )
+                .into_response()
         }
         Err(e) => {
             tracing::error!(error = %e, project = %project, "Failed to rotate service token");
@@ -312,7 +322,8 @@ pub async fn revoke(
         }
         Err(e) => {
             tracing::error!(error = %e, project = %project, "Failed to look up service token");
-            return ProblemDetails::internal_error("Failed to look up service token").into_response();
+            return ProblemDetails::internal_error("Failed to look up service token")
+                .into_response();
         }
     };
 

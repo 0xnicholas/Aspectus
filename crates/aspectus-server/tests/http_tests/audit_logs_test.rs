@@ -5,7 +5,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use chrono::SecondsFormat;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::common;
@@ -109,7 +109,11 @@ async fn filter_by_tenant_id() {
     let tenant: Value = serde_json::from_slice(&body).unwrap();
     let tenant_id = tenant["id"].as_str().unwrap();
 
-    let (status, logs) = query_audit_logs(&app, &format!("tenant_id={tenant_id}&action=tenant.created")).await;
+    let (status, logs) = query_audit_logs(
+        &app,
+        &format!("tenant_id={tenant_id}&action=tenant.created"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     let logs = logs.as_array().unwrap();
     assert_eq!(logs.len(), 1);
@@ -154,26 +158,26 @@ async fn time_range_filter() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(logs
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|e| e["target_id"] == project));
+    assert!(
+        logs.as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["target_id"] == project)
+    );
 
     // Querying a time range in the past should return nothing for this event.
     let old_to = (chrono::Utc::now() - chrono::Duration::hours(1))
         .to_rfc3339_opts(SecondsFormat::Millis, true);
-    let (status, logs) = query_audit_logs(
-        &app,
-        &format!("action=service_token.created&to={old_to}"),
-    )
-    .await;
+    let (status, logs) =
+        query_audit_logs(&app, &format!("action=service_token.created&to={old_to}")).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(!logs
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|e| e["target_id"] == project));
+    assert!(
+        !logs
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["target_id"] == project)
+    );
 
     cleanup_service_token(&app, project).await;
 }

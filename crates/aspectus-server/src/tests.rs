@@ -13,7 +13,12 @@ fn problem_details_unauthorized_format() {
     assert_eq!(json["title"], "Unauthorized");
     assert_eq!(json["detail"], "Invalid token");
     assert_eq!(json["code"], "invalid_credentials");
-    assert!(json["type"].as_str().unwrap().contains("invalid_credentials"));
+    assert!(
+        json["type"]
+            .as_str()
+            .unwrap()
+            .contains("invalid_credentials")
+    );
     assert!(json["instance"].as_str().unwrap().contains("/introspect"));
 }
 
@@ -36,8 +41,14 @@ fn problem_details_not_found_format() {
 #[test]
 fn problem_details_validation_failed_format() {
     let errors = vec![
-        crate::error::ValidationError { field: "email".into(), message: "Invalid format".into() },
-        crate::error::ValidationError { field: "name".into(), message: "Too long".into() },
+        crate::error::ValidationError {
+            field: "email".into(),
+            message: "Invalid format".into(),
+        },
+        crate::error::ValidationError {
+            field: "name".into(),
+            message: "Too long".into(),
+        },
     ];
     let pd = ProblemDetails::validation_failed("Validation failed", errors);
     let json = serde_json::to_value(&pd).unwrap();
@@ -98,7 +109,8 @@ fn generate_id_is_unique() {
 
 #[test]
 fn problem_details_with_code_includes_code_field() {
-    let pd = ProblemDetails::with_code(aspectus_core::ErrorCode::UserNotFound, "User abc not found");
+    let pd =
+        ProblemDetails::with_code(aspectus_core::ErrorCode::UserNotFound, "User abc not found");
     let json = serde_json::to_value(&pd).unwrap();
     assert_eq!(json["code"], "user_not_found");
     assert_eq!(json["status"], 404);
@@ -124,7 +136,10 @@ fn problem_details_with_code_errors() {
     let pd = ProblemDetails::with_code_errors(
         aspectus_core::ErrorCode::InvalidEmailFormat,
         "Bad email",
-        vec![ValidationError { field: "email".into(), message: "no @".into() }],
+        vec![ValidationError {
+            field: "email".into(),
+            message: "no @".into(),
+        }],
     );
     let json = serde_json::to_value(&pd).unwrap();
     assert_eq!(json["code"], "invalid_email_format");
@@ -139,7 +154,10 @@ fn problem_details_with_code_errors() {
 #[test]
 fn core_error_not_found_to_problem_details() {
     use aspectus_core::error::CoreError;
-    let err = CoreError::NotFound { entity: "User", id: "u1".into() };
+    let err = CoreError::NotFound {
+        entity: "User",
+        id: "u1".into(),
+    };
     let pd = ProblemDetails::from(err);
     let json = serde_json::to_value(&pd).unwrap();
     assert_eq!(json["status"], 404);

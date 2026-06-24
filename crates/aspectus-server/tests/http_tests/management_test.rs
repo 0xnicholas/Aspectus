@@ -13,7 +13,8 @@ use crate::common;
 /// Create a tenant via the HTTP API, return its id.
 async fn create_tenant(app: &axum::Router, name: &str) -> String {
     let req = Request::builder()
-        .uri("/tenants").method("POST")
+        .uri("/tenants")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({"name": name}).to_string()))
@@ -59,7 +60,8 @@ async fn tenant_name_validation() {
 
     // Empty name → 422
     let req = Request::builder()
-        .uri("/tenants").method("POST")
+        .uri("/tenants")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({"name": ""}).to_string()))
@@ -69,7 +71,8 @@ async fn tenant_name_validation() {
 
     // Name with invalid chars → 422
     let req = Request::builder()
-        .uri("/tenants").method("POST")
+        .uri("/tenants")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(json!({"name": "bad name!"}).to_string()))
@@ -84,17 +87,24 @@ async fn user_create_and_get() {
     let tenant_id = create_tenant(&app, "http-test-user").await;
 
     // Create user
-    let email = format!("http-test-{}@test.com", chrono::Utc::now().timestamp_millis());
+    let email = format!(
+        "http-test-{}@test.com",
+        chrono::Utc::now().timestamp_millis()
+    );
     let req = Request::builder()
-        .uri("/users").method("POST")
+        .uri("/users")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": &tenant_id,
-            "email": &email,
-            "password": "testpass123",
-            "display_name": "Test User"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": &tenant_id,
+                "email": &email,
+                "password": "testpass123",
+                "display_name": "Test User"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -103,7 +113,10 @@ async fn user_create_and_get() {
     let user_id = user["id"].as_str().unwrap();
 
     // User JSON must NOT contain password_hash
-    assert!(user.get("password_hash").is_none(), "password_hash must not be exposed");
+    assert!(
+        user.get("password_hash").is_none(),
+        "password_hash must not be exposed"
+    );
 
     // Get user
     let req = Request::builder()
@@ -133,14 +146,18 @@ async fn user_email_validation() {
 
     // Invalid email → 422
     let req = Request::builder()
-        .uri("/users").method("POST")
+        .uri("/users")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": tenant_id,
-            "email": "not-an-email",
-            "password": "testpass123"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": tenant_id,
+                "email": "not-an-email",
+                "password": "testpass123"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
@@ -154,12 +171,16 @@ async fn user_suspend_and_unsuspend() {
 
     // Create user
     let req = Request::builder()
-        .uri("/users").method("POST")
+        .uri("/users")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": &tenant_id, "email": &email, "password": "testpass123"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": &tenant_id, "email": &email, "password": "testpass123"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
@@ -208,14 +229,18 @@ async fn api_key_create_and_revoke() {
 
     // Create Service Account
     let req = Request::builder()
-        .uri("/service-accounts").method("POST")
+        .uri("/service-accounts")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "tenant_id": &tenant_id,
-            "label": "test-sa",
-            "description": "For testing"
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "tenant_id": &tenant_id,
+                "label": "test-sa",
+                "description": "For testing"
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
@@ -224,14 +249,18 @@ async fn api_key_create_and_revoke() {
 
     // Create API Key
     let req = Request::builder()
-        .uri("/api-keys").method("POST")
+        .uri("/api-keys")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::admin_service_token_header())
-        .body(Body::from(json!({
-            "service_account_id": sa_id,
-            "project": "pandaria",
-            "scopes": ["pandaria:session:create"]
-        }).to_string()))
+        .body(Body::from(
+            json!({
+                "service_account_id": sa_id,
+                "project": "pandaria",
+                "scopes": ["pandaria:session:create"]
+            })
+            .to_string(),
+        ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -259,19 +288,34 @@ async fn management_endpoints_require_auth() {
     let endpoints: [(&str, &str, serde_json::Value); 4] = [
         ("POST", "/tenants", json!({"name": "x"})),
         ("GET", "/tenants/t1", json!(null)),
-        ("POST", "/users", json!({"tenant_id":"t1","email":"a@b.com","password":"test12345"})),
-        ("POST", "/api-keys", json!({"service_account_id":"sa1","project":"pandaria","scopes":[]})),
+        (
+            "POST",
+            "/users",
+            json!({"tenant_id":"t1","email":"a@b.com","password":"test12345"}),
+        ),
+        (
+            "POST",
+            "/api-keys",
+            json!({"service_account_id":"sa1","project":"pandaria","scopes":[]}),
+        ),
     ];
 
     for (method, uri, body) in &endpoints {
         let body_str = body.to_string();
         let req = Request::builder()
-            .uri(*uri).method(*method)
+            .uri(*uri)
+            .method(*method)
             .header("Content-Type", "application/json")
             .body(Body::from(body_str))
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{} {} should require auth", method, uri);
+        assert_eq!(
+            resp.status(),
+            StatusCode::UNAUTHORIZED,
+            "{} {} should require auth",
+            method,
+            uri
+        );
     }
 }
 
@@ -279,7 +323,8 @@ async fn management_endpoints_require_auth() {
 async fn roles_list_endpoint() {
     let (app, _) = common::build_app().await.unwrap();
     let req = Request::builder()
-        .uri("/roles").method("GET")
+        .uri("/roles")
+        .method("GET")
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::empty())
         .unwrap();
@@ -296,10 +341,13 @@ async fn management_rejects_consumer_service_token() {
 
     // A consumer project token (pandaria) must NOT be able to create tenants.
     let req = Request::builder()
-        .uri("/tenants").method("POST")
+        .uri("/tenants")
+        .method("POST")
         .header("Content-Type", "application/json")
         .header("Authorization", &common::service_token_header())
-        .body(Body::from(json!({"name": "consumer-token-test"}).to_string()))
+        .body(Body::from(
+            json!({"name": "consumer-token-test"}).to_string(),
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);

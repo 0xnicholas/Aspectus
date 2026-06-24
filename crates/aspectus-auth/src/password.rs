@@ -1,8 +1,10 @@
 //! Password hashing with argon2id (v0.5.0).
 
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher as _, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{
+        PasswordHash, PasswordHasher as _, PasswordVerifier, SaltString, rand_core::OsRng,
+    },
 };
 
 pub struct PasswordHasher;

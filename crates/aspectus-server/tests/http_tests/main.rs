@@ -7,6 +7,6 @@ mod audit_logs_test;
 mod common;
 mod contract_test;
 mod introspect_test;
-mod oauth_test;
 mod management_test;
+mod oauth_test;
 mod service_tokens_test;

@@ -35,18 +35,15 @@ impl ScopeExpander {
     ///
     /// v0.10.0: Accepts an optional Redis cache. When provided, scope
     /// expansions are cached for 60 seconds to avoid repeated DB joins.
-    pub async fn expand(
-        pool: &PgPool,
-        user_id: &str,
-        cache: Option<&RedisCache>,
-    ) -> String {
+    pub async fn expand(pool: &PgPool, user_id: &str, cache: Option<&RedisCache>) -> String {
         let cache_key = format!("scope_expand:{user_id}");
 
         // Check cache first
         if let Some(cache) = cache
-            && let Some(cached) = cache.get(&cache_key).await {
-                return cached;
-            }
+            && let Some(cached) = cache.get(&cache_key).await
+        {
+            return cached;
+        }
 
         let scopes: Vec<String> = sqlx::query_scalar(
             "SELECT DISTINCT s.name

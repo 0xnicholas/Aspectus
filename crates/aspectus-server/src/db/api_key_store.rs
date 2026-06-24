@@ -19,10 +19,7 @@ impl PgApiKeyStore {
 
 #[async_trait]
 impl ApiKeyStore for PgApiKeyStore {
-    async fn insert(
-        &self,
-        params: InsertApiKeyParams,
-    ) -> Result<ApiKey, CoreError> {
+    async fn insert(&self, params: InsertApiKeyParams) -> Result<ApiKey, CoreError> {
         sqlx::query_as::<_, ApiKey>(
             "INSERT INTO api_keys (id, tenant_id, service_account_id, project, \
              key_hash, key_prefix, scopes, expires_at) \

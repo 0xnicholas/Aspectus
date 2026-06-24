@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::common;
@@ -121,7 +121,10 @@ async fn rotate_invalidates_old_token_immediately() {
     let old_token = created["token"].as_str().unwrap().to_string();
 
     // Old token works before rotation
-    assert_eq!(introspect_with_token(&app, &old_token).await, StatusCode::OK);
+    assert_eq!(
+        introspect_with_token(&app, &old_token).await,
+        StatusCode::OK
+    );
 
     // Rotate
     let req = Request::builder()
@@ -138,8 +141,14 @@ async fn rotate_invalidates_old_token_immediately() {
     assert_ne!(old_token, new_token);
 
     // Old token is rejected, new token works
-    assert_eq!(introspect_with_token(&app, &old_token).await, StatusCode::UNAUTHORIZED);
-    assert_eq!(introspect_with_token(&app, &new_token).await, StatusCode::OK);
+    assert_eq!(
+        introspect_with_token(&app, &old_token).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        introspect_with_token(&app, &new_token).await,
+        StatusCode::OK
+    );
 
     cleanup_project(&app, project).await;
 }
@@ -165,7 +174,10 @@ async fn revoke_blocks_token_and_shows_revoked_at() {
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 
     // Token is now rejected
-    assert_eq!(introspect_with_token(&app, &token).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        introspect_with_token(&app, &token).await,
+        StatusCode::UNAUTHORIZED
+    );
 
     // Metadata shows revoked_at
     let req = Request::builder()
@@ -193,7 +205,11 @@ async fn missing_project_returns_not_found() {
             .body(Body::empty())
             .unwrap();
         let resp = app.clone().oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{method} should return 404");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "{method} should return 404"
+        );
     }
 
     let req = Request::builder()

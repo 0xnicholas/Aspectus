@@ -4,12 +4,14 @@ use std::sync::OnceLock;
 
 use base64::Engine;
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rsa::pkcs8::DecodePrivateKey;
 use rsa::traits::PublicKeyParts;
 use serde::{Deserialize, Serialize};
 
-use aspectus_core::{error::CoreError, identity::IdentityType, introspect::IntrospectResponse, project::Project};
+use aspectus_core::{
+    error::CoreError, identity::IdentityType, introspect::IntrospectResponse, project::Project,
+};
 
 use crate::cache::RedisCache;
 
@@ -35,8 +37,7 @@ pub struct JwtClaims {
 
 /// Computed once from the private key at startup.
 fn build_jwks(pem: &str) -> serde_json::Value {
-    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem)
-        .expect("Invalid JWT private key PEM");
+    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem).expect("Invalid JWT private key PEM");
     let public_key = private_key.to_public_key();
     let n = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
     let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
@@ -95,11 +96,19 @@ impl JwtSigner {
             });
         let jwks = build_jwks(&pem);
         tracing::info!(kid = %jwks["keys"][0]["kid"], "JWKS ready");
-        Ok(Self { encoding_key: EncodingKey::from_rsa_pem(pem.as_bytes())?, jwks: OnceLock::from(jwks) })
+        Ok(Self {
+            encoding_key: EncodingKey::from_rsa_pem(pem.as_bytes())?,
+            jwks: OnceLock::from(jwks),
+        })
     }
     pub fn sign(
-        &self, sub: &str, tenant_id: &str, project: Project,
-        scopes: &str, identity_type: IdentityType, ttl_seconds: u64,
+        &self,
+        sub: &str,
+        tenant_id: &str,
+        project: Project,
+        scopes: &str,
+        identity_type: IdentityType,
+        ttl_seconds: u64,
     ) -> Result<String, CoreError> {
         self.sign_with_tenant_name(JwtSignRequest {
             sub: sub.to_string(),
@@ -119,16 +128,24 @@ impl JwtSigner {
         let now = Utc::now().timestamp() as usize;
         let it: &str = req.identity_type.into();
         let claims = JwtClaims {
-            sub: req.sub, tenant_id: req.tenant_id,
-            scope: req.scopes, client_id: req.project.to_string(),
+            sub: req.sub,
+            tenant_id: req.tenant_id,
+            scope: req.scopes,
+            client_id: req.project.to_string(),
             identity_type: it.to_string(),
-            aud: req.project.to_string(), iss: "https://aspectus".into(),
-            iat: now, exp: now + req.ttl_seconds as usize,
+            aud: req.project.to_string(),
+            iss: "https://aspectus".into(),
+            iat: now,
+            exp: now + req.ttl_seconds as usize,
             jti: crate::generate_id(),
             tenant_name: req.tenant_name,
         };
-        encode(&Header::new(jsonwebtoken::Algorithm::RS256), &claims, &self.encoding_key)
-            .map_err(|e| CoreError::Internal(format!("JWT: {e}")))
+        encode(
+            &Header::new(jsonwebtoken::Algorithm::RS256),
+            &claims,
+            &self.encoding_key,
+        )
+        .map_err(|e| CoreError::Internal(format!("JWT: {e}")))
     }
     pub fn jwks_json(&self) -> serde_json::Value {
         self.jwks.get().cloned().expect("JWKS not initialized")
@@ -161,7 +178,10 @@ impl JwtVerifier {
                 }
             })
             .unwrap_or_else(|| TEST_PUBLIC.to_string());
-        Ok(Self { decoding_key: DecodingKey::from_rsa_pem(pem.as_bytes())?, cache })
+        Ok(Self {
+            decoding_key: DecodingKey::from_rsa_pem(pem.as_bytes())?,
+            cache,
+        })
     }
     pub async fn verify(&self, token: &str) -> IntrospectResponse {
         let mut v = Validation::new(jsonwebtoken::Algorithm::RS256);
@@ -171,17 +191,34 @@ impl JwtVerifier {
         // audience to expect (multi-project / federated scenarios).
         v.validate_aud = false;
         let claims = match decode::<JwtClaims>(token, &self.decoding_key, &v) {
-            Ok(d) => d.claims, Err(_) => return IntrospectResponse::inactive(),
+            Ok(d) => d.claims,
+            Err(_) => return IntrospectResponse::inactive(),
         };
-        if self.cache.get(&format!("jwt_revoked:{}", claims.jti)).await.is_some() {
+        if self
+            .cache
+            .get(&format!("jwt_revoked:{}", claims.jti))
+            .await
+            .is_some()
+        {
             return IntrospectResponse::inactive();
         }
         IntrospectResponse {
-            active: true, tenant_id: Some(claims.tenant_id), user_id: Some(claims.sub),
-            identity_type: Some(claims.identity_type.as_str().try_into().unwrap_or(IdentityType::User)),
+            active: true,
+            tenant_id: Some(claims.tenant_id),
+            user_id: Some(claims.sub),
+            identity_type: Some(
+                claims
+                    .identity_type
+                    .as_str()
+                    .try_into()
+                    .unwrap_or(IdentityType::User),
+            ),
             client_id: Some(claims.client_id),
-            scope: Some(claims.scope), token_type: Some("Bearer".into()),
-            exp: Some(claims.exp as i64), quotas: None, token_format: Some("jwt".into()),
+            scope: Some(claims.scope),
+            token_type: Some("Bearer".into()),
+            exp: Some(claims.exp as i64),
+            quotas: None,
+            token_format: Some("jwt".into()),
         }
     }
     pub async fn revoke(&self, token: &str) -> bool {
@@ -189,10 +226,16 @@ impl JwtVerifier {
         v.validate_exp = false;
         v.insecure_disable_signature_validation();
         let claims = match decode::<JwtClaims>(token, &self.decoding_key, &v) {
-            Ok(d) => d.claims, Err(_) => return false,
+            Ok(d) => d.claims,
+            Err(_) => return false,
         };
-        let ttl = claims.exp.saturating_sub(Utc::now().timestamp() as usize).max(1) as u64;
-        self.cache.set(&format!("jwt_revoked:{}", claims.jti), "1", ttl).await;
+        let ttl = claims
+            .exp
+            .saturating_sub(Utc::now().timestamp() as usize)
+            .max(1) as u64;
+        self.cache
+            .set(&format!("jwt_revoked:{}", claims.jti), "1", ttl)
+            .await;
         true
     }
 }
@@ -226,11 +269,16 @@ mod tests {
     #[test]
     fn sign_and_verify_roundtrip() {
         let signer = JwtSigner::from_env().expect("JWT signer");
-        let token = signer.sign(
-            "user-1", "tenant-1", Project::Pandaria,
-            "pandaria:session:create pandaria:session:read",
-            IdentityType::User, 900,
-        ).expect("sign");
+        let token = signer
+            .sign(
+                "user-1",
+                "tenant-1",
+                Project::Pandaria,
+                "pandaria:session:create pandaria:session:read",
+                IdentityType::User,
+                900,
+            )
+            .expect("sign");
         assert!(token.starts_with("eyJ"));
 
         // Decode and verify claims
@@ -242,7 +290,8 @@ mod tests {
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
             key["e"].as_str().unwrap(),
-        ).expect("decoding key");
+        )
+        .expect("decoding key");
 
         let data = decode::<JwtClaims>(&token, &decoding_key, &validation).expect("decode");
         assert_eq!(data.claims.sub, "user-1");
@@ -254,18 +303,24 @@ mod tests {
     #[test]
     fn jwks_key_can_verify_signed_token() {
         let signer = JwtSigner::from_env().expect("JWT signer");
-        let token = signer.sign(
-            "sa-1", "t1", Project::Constell,
-            "constell:agent:read",
-            IdentityType::ServiceAccount, 3600,
-        ).expect("sign");
+        let token = signer
+            .sign(
+                "sa-1",
+                "t1",
+                Project::Constell,
+                "constell:agent:read",
+                IdentityType::ServiceAccount,
+                3600,
+            )
+            .expect("sign");
 
         let jwks = signer.jwks_json();
         let key = &jwks["keys"][0];
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
             key["e"].as_str().unwrap(),
-        ).expect("decoding key");
+        )
+        .expect("decoding key");
 
         let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
         validation.validate_exp = false;
@@ -282,21 +337,30 @@ mod tests {
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
             key["e"].as_str().unwrap(),
-        ).expect("decoding key");
+        )
+        .expect("decoding key");
         let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
         validation.validate_exp = false;
         validation.validate_aud = false;
-        decode::<JwtClaims>(token, &decoding_key, &validation).expect("decode").claims
+        decode::<JwtClaims>(token, &decoding_key, &validation)
+            .expect("decode")
+            .claims
     }
 
     #[test]
     fn jwt_with_tenant_name_includes_claim() {
         let signer = JwtSigner::from_env().expect("JWT signer");
-        let token = signer.sign_with_tenant_name(JwtSignRequest {
-            sub: "user-1".into(), tenant_id: "tenant_acme".into(), tenant_name: Some("Acme Corp".into()),
-            project: Project::Pandaria, scopes: "pandaria:session:read".into(),
-            identity_type: IdentityType::User, ttl_seconds: 900,
-        }).expect("sign");
+        let token = signer
+            .sign_with_tenant_name(JwtSignRequest {
+                sub: "user-1".into(),
+                tenant_id: "tenant_acme".into(),
+                tenant_name: Some("Acme Corp".into()),
+                project: Project::Pandaria,
+                scopes: "pandaria:session:read".into(),
+                identity_type: IdentityType::User,
+                ttl_seconds: 900,
+            })
+            .expect("sign");
 
         let claims = decode_token_for_test(&signer, &token);
         assert_eq!(claims.tenant_name.as_deref(), Some("Acme Corp"));
@@ -306,32 +370,46 @@ mod tests {
     #[test]
     fn jwt_without_tenant_name_omits_claim() {
         let signer = JwtSigner::from_env().expect("JWT signer");
-        let token = signer.sign(
-            "sa-1", "t1", Project::Constell,
-            "constell:agent:read",
-            IdentityType::ServiceAccount, 3600,
-        ).expect("sign");
+        let token = signer
+            .sign(
+                "sa-1",
+                "t1",
+                Project::Constell,
+                "constell:agent:read",
+                IdentityType::ServiceAccount,
+                3600,
+            )
+            .expect("sign");
 
         let claims = decode_token_for_test(&signer, &token);
         assert_eq!(claims.tenant_name, None);
         // Verify the JSON payload itself omits the key (skip_serializing_if works)
         let payload_part = token.split('.').nth(1).expect("payload");
         let payload_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(payload_part).expect("base64");
+            .decode(payload_part)
+            .expect("base64");
         let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).expect("json");
-        assert!(payload.get("tenant_name").is_none(),
-                "tenant_name should be absent when not provided, got: {}", payload);
+        assert!(
+            payload.get("tenant_name").is_none(),
+            "tenant_name should be absent when not provided, got: {}",
+            payload
+        );
     }
 
     #[test]
     fn legacy_sign_method_still_works() {
         // Backward compatibility: the old 6-arg sign() should keep working
         let signer = JwtSigner::from_env().expect("JWT signer");
-        let token = signer.sign(
-            "user-legacy", "t1", Project::Pandaria,
-            "pandaria:session:read",
-            IdentityType::User, 900,
-        ).expect("sign");
+        let token = signer
+            .sign(
+                "user-legacy",
+                "t1",
+                Project::Pandaria,
+                "pandaria:session:read",
+                IdentityType::User,
+                900,
+            )
+            .expect("sign");
 
         let claims = decode_token_for_test(&signer, &token);
         assert_eq!(claims.tenant_name, None);

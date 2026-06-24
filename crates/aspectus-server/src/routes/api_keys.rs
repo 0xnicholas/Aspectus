@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -15,9 +15,9 @@ use aspectus_core::{
     store::{ApiKeyStore, AuditLogStore, ServiceAccountStore, UserStore},
 };
 
+use crate::AppState;
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
-use crate::AppState;
 
 const MAX_SCOPES_PER_KEY: usize = 64;
 
@@ -57,33 +57,38 @@ pub async fn create(
         sa_id.clone()
     } else {
         return ProblemDetails::validation_failed(
-            "Either owner_type+owner_id or service_account_id is required", vec![],
-        ).into_response();
+            "Either owner_type+owner_id or service_account_id is required",
+            vec![],
+        )
+        .into_response();
     };
 
     if !["user", "service_account"].contains(&owner_type) {
         return ProblemDetails::validation_failed(
-            format!("Invalid owner_type: {owner_type}"), vec![],
-        ).into_response();
+            format!("Invalid owner_type: {owner_type}"),
+            vec![],
+        )
+        .into_response();
     }
 
     // v0.9.0: Scope count limit
     if req.scopes.len() > MAX_SCOPES_PER_KEY {
         return ProblemDetails::validation_failed(
-            format!("Too many scopes: max {MAX_SCOPES_PER_KEY}"), vec![],
-        ).into_response();
+            format!("Too many scopes: max {MAX_SCOPES_PER_KEY}"),
+            vec![],
+        )
+        .into_response();
     }
 
     // v0.3.0: Validate scopes exist in the database
     if !req.scopes.is_empty() {
-        let valid = sqlx::query_scalar::<_, bool>(
-            "SELECT COUNT(*) = $1 FROM scopes WHERE name = ANY($2)",
-        )
-        .bind(req.scopes.len() as i64)
-        .bind(&req.scopes)
-        .fetch_one(&state.pool)
-        .await
-        .unwrap_or(false);
+        let valid =
+            sqlx::query_scalar::<_, bool>("SELECT COUNT(*) = $1 FROM scopes WHERE name = ANY($2)")
+                .bind(req.scopes.len() as i64)
+                .bind(&req.scopes)
+                .fetch_one(&state.pool)
+                .await
+                .unwrap_or(false);
 
         if !valid {
             return ProblemDetails::validation_failed(
@@ -96,20 +101,22 @@ pub async fn create(
 
     // Resolve tenant_id from owner
     let tenant_id = match owner_type {
-        "user" => {
-            match state.user_store.get_by_id(&owner_id).await {
-                Ok(Some(user)) => user.tenant_id,
-                Ok(None) => return ProblemDetails::not_found(format!("User {owner_id} not found")).into_response(),
-                Err(e) => return ProblemDetails::from(e).into_response(),
+        "user" => match state.user_store.get_by_id(&owner_id).await {
+            Ok(Some(user)) => user.tenant_id,
+            Ok(None) => {
+                return ProblemDetails::not_found(format!("User {owner_id} not found"))
+                    .into_response();
             }
-        }
-        _ => {
-            match state.service_account_store.get_by_id(&owner_id).await {
-                Ok(Some(sa)) => sa.tenant_id,
-                Ok(None) => return ProblemDetails::not_found(format!("ServiceAccount {owner_id} not found")).into_response(),
-                Err(e) => return ProblemDetails::from(e).into_response(),
+            Err(e) => return ProblemDetails::from(e).into_response(),
+        },
+        _ => match state.service_account_store.get_by_id(&owner_id).await {
+            Ok(Some(sa)) => sa.tenant_id,
+            Ok(None) => {
+                return ProblemDetails::not_found(format!("ServiceAccount {owner_id} not found"))
+                    .into_response();
             }
-        }
+            Err(e) => return ProblemDetails::from(e).into_response(),
+        },
     };
 
     let expires_at = req
@@ -132,25 +139,33 @@ pub async fn create(
         Ok(key) => {
             // v0.7: Set user_id for user-owned keys (creator writes to service_account_id by default)
             if owner_type == "user" {
-                let _ = sqlx::query("UPDATE api_keys SET user_id = $1, service_account_id = NULL WHERE id = $2")
-                    .bind(&owner_id).bind(&key.id).execute(&state.pool).await;
+                let _ = sqlx::query(
+                    "UPDATE api_keys SET user_id = $1, service_account_id = NULL WHERE id = $2",
+                )
+                .bind(&owner_id)
+                .bind(&key.id)
+                .execute(&state.pool)
+                .await;
             }
 
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(),
-                tenant_id: tenant_id.clone(),
-                actor_id: "mgmt".into(),
-                actor_type: IdentityType::ServiceAccount,
-                action: "api_key.created".into(),
-                target_type: "api_key".into(),
-                target_id: key.id.clone(),
-                metadata: json!({
-                    "owner_type": owner_type, "owner_id": &owner_id,
-                    "project": req.project,
-                    "scopes": &req.scopes,
-                }),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: tenant_id.clone(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "api_key.created".into(),
+                    target_type: "api_key".into(),
+                    target_id: key.id.clone(),
+                    metadata: json!({
+                        "owner_type": owner_type, "owner_id": &owner_id,
+                        "project": req.project,
+                        "scopes": &req.scopes,
+                    }),
+                    created_at: Utc::now(),
+                })
+                .await;
 
             (StatusCode::CREATED, Json(key)).into_response()
         }
@@ -158,10 +173,7 @@ pub async fn create(
     }
 }
 
-pub async fn get(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     match state.api_key_store.find_by_id(&id).await {
         Ok(Some(key)) => {
             let item = aspectus_core::api_key::ApiKeyListItem {
@@ -198,10 +210,7 @@ pub async fn list(
     }
 }
 
-pub async fn revoke(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+pub async fn revoke(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     // Look up the key for cache invalidation and tenant for audit
     let key = match state.api_key_store.find_by_id(&id).await {
         Ok(Some(key)) => key,
@@ -213,24 +222,25 @@ pub async fn revoke(
             // Invalidate Redis cache so next introspect hits PostgreSQL
             state.api_key_verifier.invalidate_cache(&key.key_hash).await;
 
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(),
-                tenant_id: key.tenant_id.clone(),
-                actor_id: "mgmt".into(),
-                actor_type: IdentityType::ServiceAccount,
-                action: "api_key.revoked".into(),
-                target_type: "api_key".into(),
-                target_id: id.clone(),
-                metadata: json!({"revoked_at": Utc::now().to_rfc3339()}),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: key.tenant_id.clone(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "api_key.revoked".into(),
+                    target_type: "api_key".into(),
+                    target_id: id.clone(),
+                    metadata: json!({"revoked_at": Utc::now().to_rfc3339()}),
+                    created_at: Utc::now(),
+                })
+                .await;
 
             StatusCode::NO_CONTENT.into_response()
         }
-        Ok(false) => {
-            ProblemDetails::not_found(format!("ApiKey {id} not found or already revoked"))
-                .into_response()
-        }
+        Ok(false) => ProblemDetails::not_found(format!("ApiKey {id} not found or already revoked"))
+            .into_response(),
         Err(e) => {
             tracing::error!(error = %e, "Failed to revoke API key");
             ProblemDetails::internal_error("An internal error occurred").into_response()

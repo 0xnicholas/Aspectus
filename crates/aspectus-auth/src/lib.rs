@@ -5,8 +5,8 @@
 //! v0.4.0: JWT signing/verification + Opaque Token support.
 
 mod cache;
-pub mod password;
 pub mod jwt;
+pub mod password;
 mod token_verifier;
 
 use std::sync::Arc;
@@ -93,12 +93,26 @@ impl ApiKeyCreator {
         let key = format!("pk_live_{}", hex::encode(raw));
         let key_hash = sha256_hex(&raw);
         let key_prefix = key[..17].to_string();
-        self.store.insert(aspectus_core::store::InsertApiKeyParams {
-            id: id.clone(), tenant_id: tenant_id.to_string(), service_account_id: service_account_id.to_string(),
-            project, key_hash, key_prefix: key_prefix.clone(),
-            scopes: scopes.clone(), expires_at,
-        }).await?;
-        Ok(CreatedApiKey { id, key, key_prefix, project, scopes, expires_at })
+        self.store
+            .insert(aspectus_core::store::InsertApiKeyParams {
+                id: id.clone(),
+                tenant_id: tenant_id.to_string(),
+                service_account_id: service_account_id.to_string(),
+                project,
+                key_hash,
+                key_prefix: key_prefix.clone(),
+                scopes: scopes.clone(),
+                expires_at,
+            })
+            .await?;
+        Ok(CreatedApiKey {
+            id,
+            key,
+            key_prefix,
+            project,
+            scopes,
+            expires_at,
+        })
     }
 
     /// Create an Opaque Token (v0.4.0). Uses ot_ prefix.
@@ -118,12 +132,26 @@ impl ApiKeyCreator {
         let key_prefix = key[..10].to_string();
         let expires_at = Some(Utc::now() + chrono::Duration::seconds(ttl_seconds as i64));
         let scopes_vec: Vec<String> = scopes.split_whitespace().map(String::from).collect();
-        self.store.insert(aspectus_core::store::InsertApiKeyParams {
-            id: id.clone(), tenant_id: tenant_id.to_string(), service_account_id: service_account_id.to_string(),
-            project, key_hash, key_prefix: key_prefix.clone(),
-            scopes: scopes_vec.clone(), expires_at,
-        }).await?;
-        Ok(CreatedApiKey { id, key, key_prefix, project, scopes: scopes_vec, expires_at })
+        self.store
+            .insert(aspectus_core::store::InsertApiKeyParams {
+                id: id.clone(),
+                tenant_id: tenant_id.to_string(),
+                service_account_id: service_account_id.to_string(),
+                project,
+                key_hash,
+                key_prefix: key_prefix.clone(),
+                scopes: scopes_vec.clone(),
+                expires_at,
+            })
+            .await?;
+        Ok(CreatedApiKey {
+            id,
+            key,
+            key_prefix,
+            project,
+            scopes: scopes_vec,
+            expires_at,
+        })
     }
 }
 
@@ -156,14 +184,22 @@ impl ApiKeyVerifier {
         let cache_key = format!("introspect:{key_hash}");
         if let Some(cached) = self.cache.get_json::<IntrospectResponse>(&cache_key).await {
             if let Some(exp) = cached.exp
-                && exp < Utc::now().timestamp() { return IntrospectResponse::inactive(); }
+                && exp < Utc::now().timestamp()
+            {
+                return IntrospectResponse::inactive();
+            }
             return cached;
         }
         match self.store.find_by_hash(&key_hash).await {
             Ok(Some(api_key)) => {
-                if api_key.revoked_at.is_some() { return IntrospectResponse::inactive(); }
+                if api_key.revoked_at.is_some() {
+                    return IntrospectResponse::inactive();
+                }
                 if let Some(exp) = api_key.expires_at
-                    && exp < Utc::now() { return IntrospectResponse::inactive(); }
+                    && exp < Utc::now()
+                {
+                    return IntrospectResponse::inactive();
+                }
                 let response = build_response(&api_key);
                 let ttl = compute_cache_ttl(api_key.expires_at);
                 self.cache.set_json(&cache_key, &response, ttl).await;
@@ -300,26 +336,44 @@ mod tests {
     #[test]
     fn build_response_sets_api_key_format() {
         let key = ApiKey {
-            id: "k1".into(), tenant_id: "t1".into(), service_account_id: "sa1".into(),
-            project: Project::Pandaria, key_hash: "h".into(), key_prefix: "p".into(),
+            id: "k1".into(),
+            tenant_id: "t1".into(),
+            service_account_id: "sa1".into(),
+            project: Project::Pandaria,
+            key_hash: "h".into(),
+            key_prefix: "p".into(),
             scopes: vec!["pandaria:session:create".into()],
-            expires_at: None, revoked_at: None, created_at: Utc::now(),
+            expires_at: None,
+            revoked_at: None,
+            created_at: Utc::now(),
         };
         let resp = build_response(&key);
         assert!(resp.active);
         assert_eq!(resp.token_format.as_deref(), Some("api_key"));
         assert_eq!(resp.identity_type, Some(IdentityType::ServiceAccount));
         assert_eq!(resp.client_id.as_deref(), Some("pandaria"));
-        assert!(resp.scope.as_deref().unwrap().contains("pandaria:session:create"));
+        assert!(
+            resp.scope
+                .as_deref()
+                .unwrap()
+                .contains("pandaria:session:create")
+        );
     }
 
     #[test]
     fn build_response_with_expiry() {
         let exp = Utc::now() + chrono::Duration::hours(24);
         let key = ApiKey {
-            id: "k2".into(), tenant_id: "t2".into(), service_account_id: "sa2".into(),
-            project: Project::Constell, key_hash: "h2".into(), key_prefix: "p2".into(),
-            scopes: vec![], expires_at: Some(exp), revoked_at: None, created_at: Utc::now(),
+            id: "k2".into(),
+            tenant_id: "t2".into(),
+            service_account_id: "sa2".into(),
+            project: Project::Constell,
+            key_hash: "h2".into(),
+            key_prefix: "p2".into(),
+            scopes: vec![],
+            expires_at: Some(exp),
+            revoked_at: None,
+            created_at: Utc::now(),
         };
         let resp = build_response(&key);
         assert!(resp.active);

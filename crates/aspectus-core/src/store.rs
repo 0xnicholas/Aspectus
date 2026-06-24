@@ -27,10 +27,7 @@ pub trait ServiceAccountStore: Send + Sync {
         description: Option<&str>,
     ) -> Result<ServiceAccount, crate::error::CoreError>;
 
-    async fn get_by_id(
-        &self,
-        id: &str,
-    ) -> Result<Option<ServiceAccount>, crate::error::CoreError>;
+    async fn get_by_id(&self, id: &str) -> Result<Option<ServiceAccount>, crate::error::CoreError>;
 
     async fn list_by_tenant(
         &self,
@@ -55,22 +52,14 @@ pub struct InsertApiKeyParams {
 #[async_trait]
 pub trait ApiKeyStore: Send + Sync {
     /// Insert a new API key row. `key_hash` is already computed by the caller.
-    async fn insert(
-        &self,
-        params: InsertApiKeyParams,
-    ) -> Result<ApiKey, crate::error::CoreError>;
+    async fn insert(&self, params: InsertApiKeyParams) -> Result<ApiKey, crate::error::CoreError>;
 
     /// Look up by sha256 hash. Returns the full ApiKey row.
-    async fn find_by_hash(
-        &self,
-        key_hash: &str,
-    ) -> Result<Option<ApiKey>, crate::error::CoreError>;
+    async fn find_by_hash(&self, key_hash: &str)
+    -> Result<Option<ApiKey>, crate::error::CoreError>;
 
     /// Look up by primary key ID.
-    async fn find_by_id(
-        &self,
-        id: &str,
-    ) -> Result<Option<ApiKey>, crate::error::CoreError>;
+    async fn find_by_id(&self, id: &str) -> Result<Option<ApiKey>, crate::error::CoreError>;
 
     /// List all keys for a given service account (metadata only, no hash).
     async fn list_by_service_account(
@@ -108,10 +97,7 @@ pub trait AuditLogStore: Send + Sync {
     async fn append(&self, entry: AuditLog) -> Result<(), crate::error::CoreError>;
 
     /// Query audit logs with optional filters, ordered by `created_at DESC`.
-    async fn list(
-        &self,
-        filter: AuditLogFilter,
-    ) -> Result<Vec<AuditLog>, crate::error::CoreError>;
+    async fn list(&self, filter: AuditLogFilter) -> Result<Vec<AuditLog>, crate::error::CoreError>;
 }
 
 /// Persistence layer for ServiceToken lookup and lifecycle management.
@@ -156,14 +142,21 @@ pub trait UserStore: Send + Sync {
         display_name: Option<&str>,
     ) -> Result<crate::user::User, crate::error::CoreError>;
 
-    async fn get_by_id(&self, id: &str) -> Result<Option<crate::user::User>, crate::error::CoreError>;
+    async fn get_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::user::User>, crate::error::CoreError>;
 
     async fn list_by_tenant(
         &self,
         tenant_id: &str,
     ) -> Result<Vec<crate::user::User>, crate::error::CoreError>;
 
-    async fn set_suspended(&self, id: &str, suspended: bool) -> Result<bool, crate::error::CoreError>;
+    async fn set_suspended(
+        &self,
+        id: &str,
+        suspended: bool,
+    ) -> Result<bool, crate::error::CoreError>;
 }
 
 /// Persistence layer for OAuth2 authorization codes (v0.9.0).

@@ -40,19 +40,14 @@ impl ServiceAccountStore for PgServiceAccountStore {
     }
 
     async fn get_by_id(&self, id: &str) -> Result<Option<ServiceAccount>, CoreError> {
-        sqlx::query_as::<_, ServiceAccount>(
-            "SELECT * FROM service_accounts WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| CoreError::Internal(e.to_string()))
+        sqlx::query_as::<_, ServiceAccount>("SELECT * FROM service_accounts WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| CoreError::Internal(e.to_string()))
     }
 
-    async fn list_by_tenant(
-        &self,
-        tenant_id: &str,
-    ) -> Result<Vec<ServiceAccount>, CoreError> {
+    async fn list_by_tenant(&self, tenant_id: &str) -> Result<Vec<ServiceAccount>, CoreError> {
         sqlx::query_as::<_, ServiceAccount>(
             "SELECT * FROM service_accounts WHERE tenant_id = $1 ORDER BY created_at DESC",
         )

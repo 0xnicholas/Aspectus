@@ -1,17 +1,26 @@
 //! Integration tests for v0.5-v0.7 features: User, Role, OAuth2.
 //! Requires DATABASE_URL and REDIS_URL env vars.
 
-use sha2::{Digest, Sha256};
 use aspectus_auth::password::PasswordHasher;
 use aspectus_core::store::{TenantStore, UserStore};
-use aspectus_server::db::{PgTenantStore, PgServiceAccountStore, PgUserStore};
+use aspectus_server::db::{PgServiceAccountStore, PgTenantStore, PgUserStore};
 use aspectus_server::scope_expander::ScopeExpander;
+use sha2::{Digest, Sha256};
 
 fn unique_email(prefix: &str) -> String {
-    format!("{}-{}@test.com", prefix, chrono::Utc::now().timestamp_millis())
+    format!(
+        "{}-{}@test.com",
+        prefix,
+        chrono::Utc::now().timestamp_millis()
+    )
 }
 
-async fn setup() -> (PgTenantStore, PgServiceAccountStore, PgUserStore, sqlx::PgPool) {
+async fn setup() -> (
+    PgTenantStore,
+    PgServiceAccountStore,
+    PgUserStore,
+    sqlx::PgPool,
+) {
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let ts = PgTenantStore::new(pool.clone());
@@ -26,7 +35,10 @@ async fn user_create_and_get() {
     let tenant = ts.create("ut-user").await.unwrap();
     let email = unique_email("ut");
     let hash = PasswordHasher::hash("test12345").unwrap();
-    let user = us.create(&tenant.id, &email, &hash, Some("Test")).await.unwrap();
+    let user = us
+        .create(&tenant.id, &email, &hash, Some("Test"))
+        .await
+        .unwrap();
     assert_eq!(user.email.as_deref(), Some(email.as_str()));
     assert!(user.password_hash.is_some()); // populated from DB, hidden from JSON
 
@@ -60,12 +72,19 @@ async fn scope_expander_returns_scopes() {
     // Manually assign agent-developer role (HTTP handler does this automatically)
     let rid = format!("sr-{}", chrono::Utc::now().timestamp_millis());
     sqlx::query("INSERT INTO users_roles (id, user_id, role_id) VALUES ($1, $2, $3)")
-        .bind(&rid).bind(&user.id).bind("role_agent_dev")
-        .execute(&pool).await.unwrap();
+        .bind(&rid)
+        .bind(&user.id)
+        .bind("role_agent_dev")
+        .execute(&pool)
+        .await
+        .unwrap();
 
     let scopes = ScopeExpander::expand(&pool, &user.id, None).await;
     assert!(!scopes.is_empty(), "User should have scopes from role");
-    assert!(scopes.contains("pandaria"), "Should contain pandaria scopes");
+    assert!(
+        scopes.contains("pandaria"),
+        "Should contain pandaria scopes"
+    );
 }
 
 #[tokio::test]
@@ -78,10 +97,16 @@ async fn role_type_constraint_violation() {
 
     let cid = format!("cv-{}", chrono::Utc::now().timestamp_millis());
     let result = sqlx::query("INSERT INTO users_roles (id, user_id, role_id) VALUES ($1, $2, $3)")
-        .bind(&cid).bind(&user.id).bind("role_ci_deployer")
-        .execute(&pool).await;
+        .bind(&cid)
+        .bind(&user.id)
+        .bind("role_ci_deployer")
+        .execute(&pool)
+        .await;
 
-    assert!(result.is_err(), "Should reject service_account role for user");
+    assert!(
+        result.is_err(),
+        "Should reject service_account role for user"
+    );
 }
 
 #[tokio::test]
@@ -95,7 +120,12 @@ async fn oauth2_authorization_code_flow() {
     // Validate password
     let row = sqlx::query_as::<_, (String, String)>(
         "SELECT id, password_hash FROM users WHERE email = $1",
-    ).bind(&email).fetch_optional(&pool).await.unwrap().unwrap();
+    )
+    .bind(&email)
+    .fetch_optional(&pool)
+    .await
+    .unwrap()
+    .unwrap();
     assert!(PasswordHasher::verify("oauthpass123", &row.1).unwrap());
 
     // Create authorization code
@@ -106,17 +136,27 @@ async fn oauth2_authorization_code_flow() {
     sqlx::query(
         "INSERT INTO authorization_codes (code, user_id, client_id, redirect_uri, expires_at) \
          VALUES ($1, $2, $3, $4, $5)",
-    ).bind(&code).bind(&row.0).bind("pandaria")
-     .bind("https://example.com/cb")
-     .bind(chrono::Utc::now() + chrono::Duration::seconds(60))
-     .execute(&pool).await.unwrap();
+    )
+    .bind(&code)
+    .bind(&row.0)
+    .bind("pandaria")
+    .bind("https://example.com/cb")
+    .bind(chrono::Utc::now() + chrono::Duration::seconds(60))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // Exchange code
     let token_row = sqlx::query_as::<_, (String, String, String)>(
         "UPDATE authorization_codes SET used = true \
          WHERE code = $1 AND used = false AND expires_at > now() \
          RETURNING user_id, client_id, redirect_uri",
-    ).bind(&code).fetch_optional(&pool).await.unwrap().unwrap();
+    )
+    .bind(&code)
+    .fetch_optional(&pool)
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(token_row.0, user.id);
 
     // One-time use
@@ -124,7 +164,11 @@ async fn oauth2_authorization_code_flow() {
         "UPDATE authorization_codes SET used = true \
          WHERE code = $1 AND used = false AND expires_at > now() \
          RETURNING user_id, client_id, redirect_uri",
-    ).bind(&code).fetch_optional(&pool).await.unwrap();
+    )
+    .bind(&code)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
     assert!(second.is_none(), "Code should be one-time use");
 }
 
@@ -152,7 +196,12 @@ async fn refresh_token_rotation() {
         "UPDATE refresh_tokens SET revoked_at = now() \
          WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now() \
          RETURNING user_id, client_id, token_hash",
-    ).bind(&refresh_hash).fetch_optional(&pool).await.unwrap().unwrap();
+    )
+    .bind(&refresh_hash)
+    .fetch_optional(&pool)
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(row.0, user.id);
 
     // One-time use
@@ -160,7 +209,11 @@ async fn refresh_token_rotation() {
         "UPDATE refresh_tokens SET revoked_at = now() \
          WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now() \
          RETURNING user_id, client_id, token_hash",
-    ).bind(&refresh_hash).fetch_optional(&pool).await.unwrap();
+    )
+    .bind(&refresh_hash)
+    .fetch_optional(&pool)
+    .await
+    .unwrap();
     assert!(second.is_none(), "Refresh token should be one-time use");
 }
 
@@ -256,19 +309,21 @@ async fn register_and_login_flow() {
     let display_name = Some("Alice");
 
     // 1. Register (via UserStore, simulating POST /register DB layer)
-    let user = us.create(&tenant.id, &email, &hash, display_name).await.unwrap();
+    let user = us
+        .create(&tenant.id, &email, &hash, display_name)
+        .await
+        .unwrap();
     assert_eq!(user.tenant_id, tenant.id);
     assert_eq!(user.email.as_deref(), Some(email.as_str()));
     assert!(user.last_sign_in_at.is_none()); // Not logged in yet
 
     // 2. Verify password (simulating POST /login)
-    let rows: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT id, tenant_id, password_hash FROM users WHERE email = $1",
-    )
-    .bind(&email)
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT id, tenant_id, password_hash FROM users WHERE email = $1")
+            .bind(&email)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert_eq!(rows.len(), 1);
     let (uid, tid, stored_hash) = &rows[0];
     assert!(PasswordHasher::verify(password, stored_hash).unwrap());
@@ -295,7 +350,10 @@ async fn login_updates_last_sign_in() {
         .unwrap();
 
     let updated = us.get_by_id(&user.id).await.unwrap().unwrap();
-    assert!(updated.last_sign_in_at.is_some(), "last_sign_in_at should be set after login");
+    assert!(
+        updated.last_sign_in_at.is_some(),
+        "last_sign_in_at should be set after login"
+    );
 }
 
 #[tokio::test]
@@ -312,13 +370,12 @@ async fn suspended_user_login_blocked() {
     assert!(fetched.is_suspended);
 
     // Simulate login check: password is correct, but user is suspended
-    let (uid, _tid, stored_hash): (String, String, String) = sqlx::query_as(
-        "SELECT id, tenant_id, password_hash FROM users WHERE email = $1",
-    )
-    .bind(&email)
-    .fetch_one(&_pool)
-    .await
-    .unwrap();
+    let (uid, _tid, stored_hash): (String, String, String) =
+        sqlx::query_as("SELECT id, tenant_id, password_hash FROM users WHERE email = $1")
+            .bind(&email)
+            .fetch_one(&_pool)
+            .await
+            .unwrap();
     assert!(PasswordHasher::verify("test12345", &stored_hash).unwrap());
     assert_eq!(uid, user.id);
     // Handler would return 403 — we trust the handler implements this check

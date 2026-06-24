@@ -1,18 +1,11 @@
 use std::sync::Arc;
 
-use axum::{
-    extract::Request,
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, middleware::Next, response::Response};
 use chrono::Utc;
 use serde_json::json;
 
 use aspectus_core::{
-    audit_log::AuditLog,
-    identity::IdentityType,
-    project::Project,
-    store::AuditLogStore,
+    audit_log::AuditLog, identity::IdentityType, project::Project, store::AuditLogStore,
 };
 
 use crate::util::generate_id;
@@ -26,15 +19,15 @@ use crate::util::generate_id;
 ///
 /// The caller must inject `Arc<dyn AuditLogStore>` into request extensions
 /// before this middleware. See `inject_audit_store()` helper.
-pub async fn audit_mgmt_api(
-    request: Request,
-    next: Next,
-) -> Response {
+pub async fn audit_mgmt_api(request: Request, next: Next) -> Response {
     // Snapshot everything we need BEFORE the handler consumes the request.
     let method = request.method().to_string();
     let path = request.uri().path().to_string();
     let actor_project = request.extensions().get::<Project>().copied();
-    let audit_store = request.extensions().get::<Arc<dyn AuditLogStore>>().cloned();
+    let audit_store = request
+        .extensions()
+        .get::<Arc<dyn AuditLogStore>>()
+        .cloned();
 
     // Run the handler.
     let response: Response = next.run(request).await;
@@ -89,8 +82,8 @@ pub async fn audit_mgmt_api(
 /// ```
 pub fn audit_layer<S: AuditLogStore + 'static>(
     store: Arc<S>,
-) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>> + Clone
-{
+) -> impl Fn(Request, Next) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>
++ Clone {
     let store: Arc<dyn AuditLogStore> = store;
     move |mut req: Request, next: Next| {
         let store = store.clone();

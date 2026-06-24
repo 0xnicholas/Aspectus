@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -30,26 +30,26 @@ pub async fn handle(
     let version = env!("CARGO_PKG_VERSION");
 
     if !query.full {
-        return (StatusCode::OK, Json(json!({
-            "status": "ok",
-            "version": version,
-        }))).into_response();
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "status": "ok",
+                "version": version,
+            })),
+        )
+            .into_response();
     }
 
     // PostgreSQL: a simple `SELECT 1` verifies the connection pool is alive.
     let db_ok = sqlx::query("SELECT 1").fetch_one(&state.pool).await.is_ok();
 
     // Redis: PING via the verifier's health check.
-    let redis_ok = state
-        .api_key_verifier
-        .cache_health()
-        .await
-        .is_ok();
+    let redis_ok = state.api_key_verifier.cache_health().await.is_ok();
 
     let status = match (db_ok, redis_ok) {
         (true, true) => "ok",
-        (true, false) => "degraded",  // Redis down → PG fallback works
-        (false, _) => "down",         // PG dead → cannot serve anything
+        (true, false) => "degraded", // Redis down → PG fallback works
+        (false, _) => "down",        // PG dead → cannot serve anything
     };
 
     let http_status = if status == "down" {
@@ -58,10 +58,14 @@ pub async fn handle(
         StatusCode::OK
     };
 
-    (http_status, Json(json!({
-        "status": status,
-        "version": version,
-        "postgres": if db_ok { "ok" } else { "error" },
-        "redis": if redis_ok { "ok" } else { "error" },
-    }))).into_response()
+    (
+        http_status,
+        Json(json!({
+            "status": status,
+            "version": version,
+            "postgres": if db_ok { "ok" } else { "error" },
+            "redis": if redis_ok { "ok" } else { "error" },
+        })),
+    )
+        .into_response()
 }

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Form, Json};
+use axum::{Form, Json, extract::State, http::StatusCode, response::IntoResponse};
 use serde::Deserialize;
 
-use crate::scope_expander::ScopeExpander;
 use crate::AppState;
+use crate::scope_expander::ScopeExpander;
 use aspectus_core::store::TenantStore;
 
 #[derive(Deserialize)]
@@ -28,19 +28,21 @@ pub async fn handle(
     if response.active {
         // v0.5.0: For User tokens, expand scope from Roles
         if response.identity_type == Some(aspectus_core::identity::IdentityType::User)
-            && let Some(ref user_id) = response.user_id {
-                response.scope = Some(ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await);
-            }
+            && let Some(ref user_id) = response.user_id
+        {
+            response.scope =
+                Some(ScopeExpander::expand(&state.pool, user_id, Some(&state.scope_cache)).await);
+        }
 
         if let Some(ref tenant_id) = response.tenant_id
             && let Ok(Some(tenant)) = state.tenant_store.get_by_id(tenant_id).await
-                && tenant.quotas != serde_json::Value::Null
-                    && tenant.quotas != serde_json::json!({})
-                    && let Ok(quotas) =
-                        serde_json::from_value::<HashMap<String, serde_json::Value>>(tenant.quotas)
-                    {
-                        response.quotas = Some(quotas);
-                    }
+            && tenant.quotas != serde_json::Value::Null
+            && tenant.quotas != serde_json::json!({})
+            && let Ok(quotas) =
+                serde_json::from_value::<HashMap<String, serde_json::Value>>(tenant.quotas)
+        {
+            response.quotas = Some(quotas);
+        }
     }
 
     (StatusCode::OK, Json(response))

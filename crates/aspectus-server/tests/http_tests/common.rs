@@ -9,25 +9,34 @@
 
 use std::sync::Arc;
 
-use axum::{Router, extract::DefaultBodyLimit, middleware, routing::{delete, get, post, put}};
+use axum::{
+    Router,
+    extract::DefaultBodyLimit,
+    middleware,
+    routing::{delete, get, post, put},
+};
 use sha2::{Digest, Sha256};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
-use aspectus_auth::{ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier, TokenVerifier};
 use aspectus_auth::jwt::{JwtSigner, JwtVerifier};
+use aspectus_auth::{
+    ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier, TokenVerifier,
+};
+use aspectus_server::AppState;
 use aspectus_server::db::{
-    PgApiKeyStore, PgAuditLogStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
-    PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore,
+    PgApiKeyStore, PgAuditLogStore, PgAuthorizationCodeStore, PgOAuth2ClientStore,
+    PgRefreshTokenStore, PgServiceAccountStore, PgServiceTokenStore, PgTenantStore, PgUserStore,
 };
 use aspectus_server::email::LoggingEmailSender;
 use aspectus_server::middleware::auth::{require_admin_service_token, service_token_auth};
-use aspectus_server::AppState;
 
 const SERVICE_TOKEN: &str = "aspectus-dev-pandaria-service-token";
 const ADMIN_SERVICE_TOKEN: &str = "aspectus-dev-admin-service-token";
 
-pub async fn build_app() -> anyhow::Result<(Router, String)> { build_app_with().await.map(|t| (t.router, t.token_hash)) }
+pub async fn build_app() -> anyhow::Result<(Router, String)> {
+    build_app_with().await.map(|t| (t.router, t.token_hash))
+}
 
 /// Bundle returned by [`build_app_with`] — gives tests access to the
 /// router plus the underlying JwtSigner / ApiKeyCreator so they can
@@ -109,55 +118,122 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
         email_sender: Arc::new(LoggingEmailSender),
         api_key_creator,
         api_key_verifier: api_key_verifier.clone(),
-        token_verifier: Arc::new(TokenVerifier::new(api_key_verifier.clone(), jwt_verifier.clone())),
+        token_verifier: Arc::new(TokenVerifier::new(
+            api_key_verifier.clone(),
+            jwt_verifier.clone(),
+        )),
         svc_token_verifier: svc_verifier.clone(),
         jwt_signer: jwt_signer.clone(),
         jwt_verifier,
         pool: pool.clone(),
     };
 
-    let auth_layer = middleware::from_fn(move |mut req: axum::extract::Request, next: middleware::Next| {
-        let verifier = svc_verifier.clone();
-        async move {
-            req.extensions_mut().insert(verifier);
-            service_token_auth(req, next).await
-        }
-    });
+    let auth_layer = middleware::from_fn(
+        move |mut req: axum::extract::Request, next: middleware::Next| {
+            let verifier = svc_verifier.clone();
+            async move {
+                req.extensions_mut().insert(verifier);
+                service_token_auth(req, next).await
+            }
+        },
+    );
 
     let mgmt = Router::new()
         .route("/tenants", post(aspectus_server::routes::tenants::create))
         .route("/tenants/{id}", get(aspectus_server::routes::tenants::get))
-        .route("/tenants/{id}/quotas", put(aspectus_server::routes::tenants::update_quotas))
-        .route("/service-accounts", post(aspectus_server::routes::service_accounts::create).get(aspectus_server::routes::service_accounts::list))
-        .route("/service-accounts/{id}", get(aspectus_server::routes::service_accounts::get))
-        .route("/users", post(aspectus_server::routes::users::create).get(aspectus_server::routes::users::list))
+        .route(
+            "/tenants/{id}/quotas",
+            put(aspectus_server::routes::tenants::update_quotas),
+        )
+        .route(
+            "/service-accounts",
+            post(aspectus_server::routes::service_accounts::create)
+                .get(aspectus_server::routes::service_accounts::list),
+        )
+        .route(
+            "/service-accounts/{id}",
+            get(aspectus_server::routes::service_accounts::get),
+        )
+        .route(
+            "/users",
+            post(aspectus_server::routes::users::create).get(aspectus_server::routes::users::list),
+        )
         .route("/users/{id}", get(aspectus_server::routes::users::get))
-        .route("/users/{id}/suspend", put(aspectus_server::routes::users::suspend))
+        .route(
+            "/users/{id}/suspend",
+            put(aspectus_server::routes::users::suspend),
+        )
         .route("/roles", get(aspectus_server::routes::roles::list))
-        .route("/users/{id}/roles", post(aspectus_server::routes::roles::assign))
-        .route("/users/{id}/roles/{role_id}", delete(aspectus_server::routes::roles::remove))
-        .route("/api-keys", post(aspectus_server::routes::api_keys::create).get(aspectus_server::routes::api_keys::list))
-        .route("/api-keys/{id}", get(aspectus_server::routes::api_keys::get))
-        .route("/api-keys/{id}", delete(aspectus_server::routes::api_keys::revoke))
-        .route("/clients", post(aspectus_server::routes::oauth::create_client).get(aspectus_server::routes::oauth::list_clients))
-        .route("/service-tokens", post(aspectus_server::routes::service_tokens::create).get(aspectus_server::routes::service_tokens::list))
-        .route("/service-tokens/{project}", get(aspectus_server::routes::service_tokens::get).delete(aspectus_server::routes::service_tokens::revoke))
-        .route("/service-tokens/{project}/rotate", post(aspectus_server::routes::service_tokens::rotate))
-        .route("/audit-logs", get(aspectus_server::routes::audit_logs::list))
+        .route(
+            "/users/{id}/roles",
+            post(aspectus_server::routes::roles::assign),
+        )
+        .route(
+            "/users/{id}/roles/{role_id}",
+            delete(aspectus_server::routes::roles::remove),
+        )
+        .route(
+            "/api-keys",
+            post(aspectus_server::routes::api_keys::create)
+                .get(aspectus_server::routes::api_keys::list),
+        )
+        .route(
+            "/api-keys/{id}",
+            get(aspectus_server::routes::api_keys::get),
+        )
+        .route(
+            "/api-keys/{id}",
+            delete(aspectus_server::routes::api_keys::revoke),
+        )
+        .route(
+            "/clients",
+            post(aspectus_server::routes::oauth::create_client)
+                .get(aspectus_server::routes::oauth::list_clients),
+        )
+        .route(
+            "/service-tokens",
+            post(aspectus_server::routes::service_tokens::create)
+                .get(aspectus_server::routes::service_tokens::list),
+        )
+        .route(
+            "/service-tokens/{project}",
+            get(aspectus_server::routes::service_tokens::get)
+                .delete(aspectus_server::routes::service_tokens::revoke),
+        )
+        .route(
+            "/service-tokens/{project}/rotate",
+            post(aspectus_server::routes::service_tokens::rotate),
+        )
+        .route(
+            "/audit-logs",
+            get(aspectus_server::routes::audit_logs::list),
+        )
         .layer(middleware::from_fn(require_admin_service_token))
         .layer(auth_layer.clone())
         .with_state(state.clone());
 
     let app = Router::new()
-        .route("/introspect", post(aspectus_server::routes::introspect::handle))
+        .route(
+            "/introspect",
+            post(aspectus_server::routes::introspect::handle),
+        )
         .route_layer(auth_layer)
         .route("/health", get(aspectus_server::routes::health::handle))
         .route("/metrics", get(aspectus_server::routes::metrics::handle))
-        .route("/.well-known/jwks.json", get(aspectus_server::routes::token::jwks))
-        .route("/authorize", post(aspectus_server::routes::oauth::authorize))
+        .route(
+            "/.well-known/jwks.json",
+            get(aspectus_server::routes::token::jwks),
+        )
+        .route(
+            "/authorize",
+            post(aspectus_server::routes::oauth::authorize),
+        )
         .route("/oauth/token", post(aspectus_server::routes::oauth::token))
         .route("/login", post(aspectus_server::routes::auth::login))
-        .route("/login/lookup", post(aspectus_server::routes::auth::login_lookup))
+        .route(
+            "/login/lookup",
+            post(aspectus_server::routes::auth::login_lookup),
+        )
         .with_state(state.clone())
         .merge(mgmt)
         .layer(CorsLayer::permissive())

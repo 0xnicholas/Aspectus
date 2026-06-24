@@ -1,5 +1,5 @@
-use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 
 pub mod api_key_store;
 pub mod audit_log_store;
@@ -11,7 +11,7 @@ pub mod user_store;
 
 pub use api_key_store::PgApiKeyStore;
 pub use audit_log_store::PgAuditLogStore;
-pub use oauth_store::{PgAuthorizationCodeStore, PgRefreshTokenStore, PgOAuth2ClientStore};
+pub use oauth_store::{PgAuthorizationCodeStore, PgOAuth2ClientStore, PgRefreshTokenStore};
 pub use service_account_store::PgServiceAccountStore;
 pub use service_token_store::PgServiceTokenStore;
 pub use tenant_store::PgTenantStore;

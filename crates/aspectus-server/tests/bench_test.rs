@@ -20,7 +20,9 @@ async fn introspect_cold_path_bench() {
 
     let pool = sqlx::PgPool::connect(&db_url).await.unwrap();
     let redis_client = redis::Client::open(redis_url.as_str()).unwrap();
-    let cache = RedisCache::new(redis_client).await.expect("Redis connection failed");
+    let cache = RedisCache::new(redis_client)
+        .await
+        .expect("Redis connection failed");
 
     let tenant_store = PgTenantStore::new(pool.clone());
     let sa_store = PgServiceAccountStore::new(pool.clone());
@@ -48,8 +50,6 @@ async fn introspect_cold_path_bench() {
     let elapsed = start.elapsed();
 
     let avg_us = elapsed.as_micros() / n as u128;
-    println!(
-        "introspect x{n}: total={elapsed:?}, avg={avg_us}µs",
-    );
+    println!("introspect x{n}: total={elapsed:?}, avg={avg_us}µs",);
     assert!(avg_us < 5000, "avg {avg_us}µs exceeds 5ms target");
 }

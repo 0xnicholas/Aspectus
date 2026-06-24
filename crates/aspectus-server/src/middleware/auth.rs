@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use aspectus_auth::ServiceTokenVerifier;
+use aspectus_core::project::Project;
 use axum::{
     extract::Request,
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use aspectus_auth::ServiceTokenVerifier;
-use aspectus_core::project::Project;
 
 use crate::error::ProblemDetails;
 
@@ -14,10 +14,7 @@ use crate::error::ProblemDetails;
 ///
 /// Extracts `Authorization: Bearer {token}` header and verifies it through
 /// `ServiceTokenVerifier`. On success, injects the `Project` into request extensions.
-pub async fn service_token_auth(
-    mut request: Request,
-    next: Next,
-) -> Response {
+pub async fn service_token_auth(mut request: Request, next: Next) -> Response {
     let auth_header = request
         .headers()
         .get(axum::http::header::AUTHORIZATION)
@@ -48,14 +45,12 @@ pub async fn service_token_auth(
             request.extensions_mut().insert(project);
             next.run(request).await
         }
-        None => {
-            ProblemDetails::with_code_instance(
-                aspectus_core::ErrorCode::InvalidServiceToken,
-                "Invalid Service Token",
-                request.uri().path(),
-            )
-                .into_response()
-        }
+        None => ProblemDetails::with_code_instance(
+            aspectus_core::ErrorCode::InvalidServiceToken,
+            "Invalid Service Token",
+            request.uri().path(),
+        )
+        .into_response(),
     }
 }
 
@@ -65,10 +60,7 @@ pub async fn service_token_auth(
 /// Must run AFTER [`service_token_auth`] so that the `Project` extension is
 /// present. This prevents consumer project tokens (pandaria, constell, etc.)
 /// from calling management endpoints.
-pub async fn require_admin_service_token(
-    request: Request,
-    next: Next,
-) -> Response {
+pub async fn require_admin_service_token(request: Request, next: Next) -> Response {
     match request.extensions().get::<Project>() {
         Some(Project::Aspectus) => next.run(request).await,
         Some(_) => ProblemDetails::forbidden("Management endpoints require an admin service token")

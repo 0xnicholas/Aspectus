@@ -4,18 +4,16 @@
 //! actions that write to `audit_logs` should be queryable here.
 
 use axum::{
+    Json,
     extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 
-use aspectus_core::{
-    store::{AuditLogFilter, AuditLogStore},
-};
+use aspectus_core::store::{AuditLogFilter, AuditLogStore};
 
-use crate::error::ProblemDetails;
 use crate::AppState;
+use crate::error::ProblemDetails;
 
 const MAX_AUDIT_LIMIT: i64 = 1000;
 
@@ -31,11 +29,8 @@ pub async fn list(
         .into_response();
     }
     if filter.offset < 0 {
-        return ProblemDetails::validation_failed(
-            "offset must be non-negative",
-            vec![],
-        )
-        .into_response();
+        return ProblemDetails::validation_failed("offset must be non-negative", vec![])
+            .into_response();
     }
 
     match state.audit_log_store.list(filter).await {

@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -14,9 +14,9 @@ use aspectus_core::{
     store::{AuditLogStore, ServiceAccountStore},
 };
 
+use crate::AppState;
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
-use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct CreateServiceAccountRequest {
@@ -40,17 +40,20 @@ pub async fn create(
         .await
     {
         Ok(sa) => {
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(),
-                tenant_id: sa.tenant_id.clone(),
-                actor_id: "mgmt".into(),
-                actor_type: IdentityType::ServiceAccount,
-                action: "service_account.created".into(),
-                target_type: "service_account".into(),
-                target_id: sa.id.clone(),
-                metadata: json!({"tenant_id": &sa.tenant_id, "label": &sa.label}),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: sa.tenant_id.clone(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "service_account.created".into(),
+                    target_type: "service_account".into(),
+                    target_id: sa.id.clone(),
+                    metadata: json!({"tenant_id": &sa.tenant_id, "label": &sa.label}),
+                    created_at: Utc::now(),
+                })
+                .await;
 
             (StatusCode::CREATED, Json(sa)).into_response()
         }
@@ -58,13 +61,12 @@ pub async fn create(
     }
 }
 
-pub async fn get(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
+pub async fn get(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     match state.service_account_store.get_by_id(&id).await {
         Ok(Some(sa)) => Json(sa).into_response(),
-        Ok(None) => ProblemDetails::not_found(format!("ServiceAccount {id} not found")).into_response(),
+        Ok(None) => {
+            ProblemDetails::not_found(format!("ServiceAccount {id} not found")).into_response()
+        }
         Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
     }
 }

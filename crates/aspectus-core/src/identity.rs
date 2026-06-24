@@ -30,9 +30,9 @@ impl TryFrom<&str> for IdentityType {
         match s {
             "user" => Ok(IdentityType::User),
             "service_account" => Ok(IdentityType::ServiceAccount),
-            other => Err(crate::error::CoreError::Validation(
-                format!("Unknown identity_type: {other}"),
-            )),
+            other => Err(crate::error::CoreError::Validation(format!(
+                "Unknown identity_type: {other}"
+            ))),
         }
     }
 }

@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::{Path, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use chrono::Utc;
 use serde::Deserialize;
@@ -10,10 +10,10 @@ use serde_json::json;
 
 use aspectus_core::{audit_log::AuditLog, identity::IdentityType, role::Role};
 
-use crate::error::ProblemDetails;
-use crate::util::generate_id;
 use crate::AppState;
+use crate::error::ProblemDetails;
 use crate::scope_expander::ScopeExpander;
+use crate::util::generate_id;
 use aspectus_core::store::AuditLogStore;
 
 #[derive(Deserialize)]
@@ -37,26 +37,31 @@ pub async fn assign(
     Json(req): Json<AssignRoleRequest>,
 ) -> impl IntoResponse {
     let id = generate_id();
-    match sqlx::query(
-        "INSERT INTO users_roles (id, user_id, role_id) VALUES ($1, $2, $3)",
-    )
-    .bind(&id)
-    .bind(&user_id)
-    .bind(&req.role_id)
-    .execute(&state.pool)
-    .await
+    match sqlx::query("INSERT INTO users_roles (id, user_id, role_id) VALUES ($1, $2, $3)")
+        .bind(&id)
+        .bind(&user_id)
+        .bind(&req.role_id)
+        .execute(&state.pool)
+        .await
     {
         Ok(_) => {
             // Invalidate scope cache for this user
             ScopeExpander::invalidate(&state.scope_cache, &user_id).await;
 
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(), tenant_id: String::new(),
-                actor_id: "mgmt".into(), actor_type: IdentityType::ServiceAccount,
-                action: "role.assigned".into(), target_type: "role".into(),
-                target_id: req.role_id, metadata: json!({"user_id": &user_id}),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: String::new(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "role.assigned".into(),
+                    target_type: "role".into(),
+                    target_id: req.role_id,
+                    metadata: json!({"user_id": &user_id}),
+                    created_at: Utc::now(),
+                })
+                .await;
             (StatusCode::CREATED, Json(json!({"id": id}))).into_response()
         }
         Err(e) => {
@@ -84,13 +89,20 @@ pub async fn remove(
             // Invalidate scope cache for this user
             ScopeExpander::invalidate(&state.scope_cache, &user_id).await;
 
-            let _ = state.audit_log_store.append(AuditLog {
-                id: generate_id(), tenant_id: String::new(),
-                actor_id: "mgmt".into(), actor_type: IdentityType::ServiceAccount,
-                action: "role.removed".into(), target_type: "role".into(),
-                target_id: role_id, metadata: json!({"user_id": &user_id}),
-                created_at: Utc::now(),
-            }).await;
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: String::new(),
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "role.removed".into(),
+                    target_type: "role".into(),
+                    target_id: role_id,
+                    metadata: json!({"user_id": &user_id}),
+                    created_at: Utc::now(),
+                })
+                .await;
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(_) => ProblemDetails::not_found("User or role not found").into_response(),
