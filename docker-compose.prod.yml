@@ -1,3 +1,5 @@
+name: aspectus
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -34,9 +36,14 @@ services:
       JWT_TTL_SECONDS: 900
       OPAQUE_TOKEN_TTL_SECONDS: 3600
       # Required: management endpoints (/tenants, /users, /api-keys, ...) need this token.
-      # Use a strong, rotated secret in production.
+      # Use a strong, rotated secret in production. Rotate via `POST /service-tokens/{project}/rotate`.
       ASPECTUS_ADMIN_SERVICE_TOKEN: change-me-in-production
-      # Uncomment for production JWT keys:
+      # Email transport: "logging" (default, dev) or "smtp".
+      # ASPECTUS_EMAIL_TRANSPORT: logging
+      # For SMTP, also set ASPECTUS_SMTP_HOST/PORT/USERNAME/PASSWORD/EMAIL_FROM.
+      #
+      # Production JWT keys: mount PEM files as Docker secrets or volumes and reference paths here.
+      # Do NOT commit real PEM content into version control.
       # JWT_PRIVATE_KEY_PEM: /run/secrets/jwt_private
       # JWT_PUBLIC_KEY_PEM: /run/secrets/jwt_public
     depends_on:
@@ -44,6 +51,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3100/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     restart: unless-stopped
 
 volumes:

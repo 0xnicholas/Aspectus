@@ -1,8 +1,8 @@
 # Aspectus Operations Runbook
 
-> 版本：v1.0.0 | 最后更新：2026-06-15
+> 版本：v1.1.0 | 最后更新：2026-06-23
 
-本文档描述 Aspectus 生产运维的标准操作流程和常见故障处理。
+本文档描述 Aspectus 生产运维的标准操作流程、本地开发速查和常见故障处理。
 
 ---
 
@@ -15,6 +15,40 @@
 | 副本数 | 3 (生产) |
 | 依赖 | PostgreSQL 17, Redis 7 |
 | 关键端点 | `POST /introspect` (每请求必调), `POST /authorize`, `POST /oauth/token` |
+
+---
+
+## 本地开发速查
+
+### 启动依赖
+
+```bash
+docker compose up -d
+DATABASE_URL=postgresql://aspectus:aspectus_dev@localhost:5433/aspectus sqlx migrate run
+```
+
+### 运行全部测试
+
+```bash
+DATABASE_URL=postgresql://aspectus:aspectus_dev@localhost:5433/aspectus \
+  REDIS_URL=redis://localhost:6380 \
+  cargo test --workspace
+```
+
+### 启动后端
+
+```bash
+cargo run -p aspectus-server
+```
+
+### 启动管理控制台
+
+```bash
+cd console
+npm install
+npm run dev
+# http://localhost:5180/
+```
 
 ---
 
@@ -81,6 +115,20 @@ curl http://aspectus:3100/health
 # 完整检查（含 PG + Redis）
 curl "http://aspectus:3100/health?full=true"
 # → {"status":"ok","postgres":"ok","redis":"ok"}
+```
+
+### Service Token 轮换
+
+```bash
+# 1. 轮换 pandaria 的 service token（返回一次性新 token）
+curl -X POST -H "Authorization: Bearer $ADMIN_SERVICE_TOKEN" \
+  http://aspectus:3100/service-tokens/pandaria/rotate
+
+# 2. 更新对应项目的 secret 配置
+
+# 3. 如 token 已泄露，先吊销再创建新的
+curl -X DELETE -H "Authorization: Bearer $ADMIN_SERVICE_TOKEN" \
+  http://aspectus:3100/service-tokens/pandaria
 ```
 
 ---

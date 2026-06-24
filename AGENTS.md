@@ -184,6 +184,7 @@ POST /introspect
 | `DELETE /service-tokens/{project}` | 吊销指定项目 Service Token |
 | `GET /audit-logs` | 查询审计日志（按租户/动作/目标/时间范围过滤） |
 | `POST /users` | 创建用户（含角色分配） |
+| `GET /users/{id}` | 查询用户详情 |
 | `GET /users/{id}/scopes` | 查询用户有效 scope |
 
 ### OAuth2 端点（P2——Phase 3 后）
@@ -261,18 +262,21 @@ AuditLog
 
 ---
 
-## 项目结构（规划）
+## 项目结构
 
 ```
 Aspectus/
 ├── Cargo.toml
 ├── crates/
-│   ├── aspectus-core/          # 核心域模型：Tenant, User, APIKey, Scope, Role
-│   ├── aspectus-server/        # axum HTTP 服务：introspect + 管理 API
+│   ├── aspectus-core/          # 核心域模型：Tenant, User, APIKey, Scope, Role, ServiceToken
+│   ├── aspectus-server/        # axum HTTP 服务：introspect + 管理 API + Store 实现
 │   ├── aspectus-auth/          # 认证逻辑：JWT 签发/验证、API Key 哈希、argon2id
 │   └── aspectus-client/        # Rust client library（其他 Rust 项目用）
+├── console/                    # React + Vite 管理控制台
 ├── migrations/                 # PostgreSQL 迁移
 ├── tests/                      # 集成测试（testcontainers）
+├── scripts/                    # 工具脚本（如生成 JWT 密钥）
+├── docs/                       # ADR、规格、运维文档
 ├── AGENTS.md                   # 本文件
 └── README.md
 ```
@@ -294,18 +298,23 @@ Aspectus/
 
 **验收**：Pandaria 不再使用 HMAC token，改为调 Aspectus `/introspect` 验证 Bearer token。
 
-### Phase 2 — 多项目接入 + 配额
+### Phase 2 — 多项目接入 + 配额 + 控制台功能补齐
 
 - [x] 多 project scope 支持
 - [x] 租户配额配置 API
+- [x] Service Token 管理 UI（创建/轮换/吊销）
+- [x] Audit Log 查询 UI
+- [x] Tenant 列表与配额编辑 UI
 - [ ] Constell、Tokencamp 接入（在对应项目侧跟踪，不在本仓库）
-- [x] API Key 管理 UI（已内置于 Aspectus 管理控制台）
+- [x] API Key 管理 UI（已内置于 Aspectus 管理控制台，支持按 user/service_account 创建）
 
-### Phase 3 — 用户 + OAuth2
+### Phase 3 — 用户 + OAuth2 + 资源详情页
 
 - [x] User 模型 + 密码认证
-- [x] OAuth2 Authorization Code flow（`POST /authorize`，PKCE，refresh token）
+- [x] OAuth2 Authorization Code flow（`POST /authorize`，refresh token）
 - [x] Role 管理
+- [x] Tenant 详情页（含用户/服务账号列表）
+- [x] Service Account 详情页（含 API Key 创建/吊销）
 - [ ] Emerald entity_id 迁移到 `tenant_id:user_id`（在 Pandaria 侧实现）
 
 ---
@@ -319,6 +328,7 @@ Aspectus/
 5. **密钥不得出现在日志中**：JWT signature、API Key 原文、用户密码——禁止出现在任何 tracing span、日志、错误消息中。
 6. **跨租户登录路由**：`/login`、`/authorize` 与 `/forgot-password` 必须按 `(tenant_id, email)` 复合查找用户（ADR-016 决策 1），不得仅按 email 查询（跨租户同邮箱会路由到错误身份）。`/login/lookup` 端点对未知邮箱必须返回空列表（非 4xx），避免邮箱枚举攻击。
 7. **管理 API 需要 admin service token**：管理端点（`/tenants`、`/users`、`/api-keys` 等）必须使用属于内部 `aspectus` 项目的 service token，消费项目 token（pandaria、constell 等）不得调用管理端点。
+8. **前端控制台仅用于内部运维**：`VITE_SERVICE_TOKEN` 会被打包进浏览器 bundle，禁止在公网直接暴露控制台。生产环境必须位于内部网络或 authenticating reverse proxy 之后；公网场景请改用 BFF 反向代理或在服务端注入 Authorization header。
 
 ---
 

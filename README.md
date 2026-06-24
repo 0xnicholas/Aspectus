@@ -13,22 +13,36 @@ Aspectus 是 Pandaria 生态的单一身份源，为所有项目提供统一的 
 ## 快速开始
 
 ```bash
-# 1. 启动依赖
+# 1. 启动 PostgreSQL + Redis（端口映射为 5433/6380）
 docker compose up -d
 
 # 2. 设置环境变量
 cp .env.example .env
+# 编辑 .env，填入 DATABASE_URL/REDIS_URL 与 ASPECTUS_ADMIN_SERVICE_TOKEN
+# 示例：
+#   DATABASE_URL=postgresql://aspectus:aspectus_dev@localhost:5433/aspectus
+#   REDIS_URL=redis://localhost:6389
+#   ASPECTUS_ADMIN_SERVICE_TOKEN=change-me-in-dev
 
 # 3. 运行 migration
-sqlx migrate run
+DATABASE_URL=postgresql://aspectus:aspectus_dev@localhost:5433/aspectus sqlx migrate run
 
-# 4. 添加 Service Token
-psql $DATABASE_URL -c "INSERT INTO service_tokens (project, token_hash) VALUES ('pandaria', '$(echo -n 'your-service-token' | sha256sum | cut -d' ' -f1)')"
+# 4. 生成 JWT 密钥（可选；代码内置 dev test key，仅本地开发可跳过）
+./scripts/generate-jwt-keys.sh
+# 将 jwt_private.pem / jwt_public.pem 路径或内容写入 .env
 
-# 5. 启动服务
+# 5. 启动后端服务
 cargo run -p aspectus-server
 
-# 6. 验证
+# 6. 启动管理控制台（新终端）
+cd console
+cp .env.example .env
+# 填入 VITE_API_BASE=http://localhost:3100 与 VITE_SERVICE_TOKEN（同 admin service token）
+npm install
+npm run dev
+# 控制台默认在 http://localhost:5180/
+
+# 7. 验证后端健康检查
 curl http://localhost:3100/health
 ```
 
@@ -46,20 +60,42 @@ curl http://localhost:3100/health
 | `/forgot-password` | POST | 无 | 生成密码重置 token |
 | `/reset-password` | POST | 无 | 验证 token + 更新密码 |
 | `/tenants` | POST/GET | Service Token | 租户管理 |
+| `/tenants/{id}` | GET | Service Token | 租户详情 |
 | `/tenants/{id}/quotas` | PUT | Service Token | 配额配置 |
 | `/service-accounts` | POST/GET | Service Token | 服务账号 |
+| `/service-accounts/{id}` | GET | Service Token | 服务账号详情 |
 | `/users` | POST/GET | Service Token | 用户管理 |
+| `/users/{id}` | GET | Service Token | 用户详情 |
 | `/users/{id}/suspend` | PUT | Service Token | 挂起/恢复用户 |
-| `/roles` | GET | Service Token | 角色列表 |
 | `/users/{id}/roles` | POST/DELETE | Service Token | 角色分配 |
+| `/roles` | GET | Service Token | 角色列表 |
 | `/api-keys` | POST/GET | Service Token | API Key 管理 |
 | `/api-keys/{id}` | GET/DELETE | Service Token | 查询/吊销 Key |
+| `/service-tokens` | POST/GET | Admin Service Token | 生态项目 Service Token 管理 |
+| `/service-tokens/{project}/rotate` | POST | Admin Service Token | 轮换 Service Token |
+| `/audit-logs` | GET | Admin Service Token | 审计日志查询 |
 | `/authorize` | POST | 无 | OAuth2 授权 |
 | `/oauth/token` | POST | 无 | OAuth2 Token |
 | `/clients` | POST/GET | Service Token | OAuth2 Client |
 | `/.well-known/jwks.json` | GET | 无 | JWT 公钥 |
 
 完整 API 文档见 [docs/openapi.yaml](docs/openapi.yaml)。
+
+## 管理控制台
+
+项目内置 React + Vite 管理控制台，源码在 `console/`。构建产物会被服务端嵌套在 `/admin` 路径下。
+
+```bash
+cd console
+cp .env.example .env
+# 必须配置：
+#   VITE_API_BASE=http://localhost:3100
+#   VITE_SERVICE_TOKEN=你的 admin service token
+npm install
+npm run dev   # http://localhost:5180/
+```
+
+> ⚠️ **安全警告**：`VITE_SERVICE_TOKEN` 会被打包进前端 bundle。仅允许在内部网络或已有身份验证的反向代理后使用。若需公网暴露，请改用 BFF 反向代理或在服务端注入 Authorization header。
 
 > **生态项目接入**（Pandaria / Constell / Tokencamp / Heirloom / Emerald）：如何把 Aspectus 接入你的服务网关，参见 [消费者接入指南](docs/consumer-integration.md)。涵盖完整中间件实现、错误处理矩阵、本地 JWT 验签优化、灰度与回滚。
 
@@ -196,15 +232,23 @@ Aspectus/
 ## 开发
 
 ```bash
-# 运行测试
-DATABASE_URL="..." REDIS_URL="..." cargo test --workspace
+# 1. 启动依赖
+docker compose up -d
 
-# 集成测试
-DATABASE_URL="..." REDIS_URL="..." cargo test -p aspectus-server --test integration_test
+# 2. 运行 migration
+DATABASE_URL=postgresql://aspectus:aspectus_dev@localhost:5433/aspectus sqlx migrate run
 
-# 代码检查
-cargo clippy --all-targets
+# 3. 运行全部测试（包含集成测试）
+DATABASE_URL=postgresql://aspectus:aspectus_dev@localhost:5433/aspectus \
+  REDIS_URL=redis://localhost:6380 \
+  cargo test --workspace
+
+# 4. 代码检查
+cargo clippy --all-targets --all-features
 cargo fmt --all -- --check
+
+# 5. 前端检查
+cd console && npm run lint && npm run build
 ```
 
 ## 版本
