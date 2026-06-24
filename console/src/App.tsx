@@ -9,6 +9,8 @@ import { Roles } from "./pages/Roles";
 import { Clients } from "./pages/Clients";
 import { AuditLogs } from "./pages/AuditLogs";
 import { ServiceTokens } from "./pages/ServiceTokens";
+import { TenantDetail } from "./pages/TenantDetail";
+import { ServiceAccountDetail } from "./pages/ServiceAccountDetail";
 
 const NAV = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -32,7 +34,7 @@ function Sidebar() {
       </div>
       <nav className="flex-1 space-y-1 p-3">
         {NAV.map((item) => {
-          const active = location.pathname === item.path;
+          const active = location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path));
           const Icon = item.icon;
           return (
             <Link
@@ -62,8 +64,10 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/tenants" element={<Tenants />} />
+            <Route path="/tenants/:id" element={<TenantDetail />} />
             <Route path="/users" element={<Users />} />
             <Route path="/service-accounts" element={<ServiceAccounts />} />
+            <Route path="/service-accounts/:id" element={<ServiceAccountDetail />} />
             <Route path="/api-keys" element={<ApiKeys />} />
             <Route path="/roles" element={<Roles />} />
             <Route path="/clients" element={<Clients />} />

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Table, toast } from "../components/ui";
+import { Button, Input, LinkButton, Table, toast } from "../components/ui";
 import { api } from "../api/client";
 
 export function ServiceAccounts() {
@@ -19,9 +19,10 @@ export function ServiceAccounts() {
   };
 
   const columns = [
-    { key: "id", header: "ID", render: (a: any) => <code style={{ fontSize: 11 }}>{a.id}</code> },
-    { key: "label", header: "Label" },
+    { key: "id", header: "ID", render: (a: any) => <code className="text-xs text-gray-500">{a.id}</code> },
+    { key: "label", header: "Label", render: (a: any) => <span className="font-medium">{a.label}</span> },
     { key: "created_at", header: "Created", render: (a: any) => new Date(a.created_at).toLocaleDateString() },
+    { key: "actions", header: "", render: (a: any) => <LinkButton size="sm" variant="outline" to={`/service-accounts/${a.id}`}>View</LinkButton> },
   ];
 
   return (

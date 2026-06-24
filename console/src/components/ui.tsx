@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "../lib/utils";
 
@@ -311,4 +312,37 @@ interface EmptyStateProps {
 
 export function EmptyState({ message = "No data" }: EmptyStateProps) {
   return <p className="mt-6 rounded-lg border border-dashed border-border bg-white p-8 text-center text-sm text-gray-400">{message}</p>;
+}
+
+// ── Card ──
+
+interface CardProps {
+  title?: string;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function Card({ title, children, className }: CardProps) {
+  return (
+    <div className={cn("rounded-xl border border-border bg-white p-5", className)}>
+      {title && <h3 className="mb-3 text-sm font-semibold text-gray-900">{title}</h3>}
+      {children}
+    </div>
+  );
+}
+
+// ── LinkButton ──
+
+interface LinkButtonProps extends React.ComponentPropsWithoutRef<typeof Link> {
+  variant?: VariantProps<typeof buttonVariants>["variant"];
+  size?: VariantProps<typeof buttonVariants>["size"];
+}
+
+export function LinkButton({ className, variant, size, ...props }: LinkButtonProps) {
+  return (
+    <Link
+      className={cn(buttonVariants({ variant, size }), className)}
+      {...props}
+    />
+  );
 }

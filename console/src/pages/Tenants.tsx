@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Input, Modal, PageHeader, Table, toast, EmptyState } from "../components/ui";
+import { Button, Input, LinkButton, Modal, PageHeader, Table, toast, EmptyState } from "../components/ui";
 import { api } from "../api/client";
 
 export function Tenants() {
@@ -61,7 +61,12 @@ export function Tenants() {
     { key: "name", header: "Name", render: (t: any) => <span className="font-medium">{t.name}</span> },
     { key: "created_at", header: "Created", render: (t: any) => new Date(t.created_at).toLocaleString() },
     { key: "quotas", header: "Quotas", render: (t: any) => <code className="text-xs text-gray-500">{JSON.stringify(t.quotas ?? {})}</code> },
-    { key: "actions", header: "", render: (t: any) => <Button size="sm" variant="outline" onClick={() => openEdit(t)}>Edit Quotas</Button> },
+    { key: "actions", header: "", render: (t: any) => (
+      <div className="flex gap-2">
+        <LinkButton size="sm" variant="outline" to={`/tenants/${t.id}`}>View</LinkButton>
+        <Button size="sm" variant="outline" onClick={() => openEdit(t)}>Edit Quotas</Button>
+      </div>
+    )},
   ];
 
   return (

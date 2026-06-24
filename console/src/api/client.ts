@@ -81,6 +81,7 @@ export const api = {
   // Service Accounts
   listServiceAccounts: (tenant_id: string) =>
     request<any[]>(`/service-accounts?tenant_id=${tenant_id}`),
+  getServiceAccount: (id: string) => request<any>(`/service-accounts/${id}`),
   createServiceAccount: (data: any) =>
     request<any>("/service-accounts", { method: "POST", body: JSON.stringify(data) }),
 
