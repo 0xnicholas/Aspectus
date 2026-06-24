@@ -24,7 +24,9 @@ async fn create_service_token(app: &axum::Router, project: &str) -> Value {
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     serde_json::from_slice(&body).unwrap()
 }
 
@@ -42,7 +44,9 @@ async fn query_audit_logs(app: &axum::Router, query: &str) -> (StatusCode, Value
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     let status = resp.status();
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let value: Value = serde_json::from_slice(&body).unwrap_or(json!(null));
     (status, value)
 }
@@ -105,7 +109,9 @@ async fn filter_by_tenant_id() {
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
     let tenant: Value = serde_json::from_slice(&body).unwrap();
     let tenant_id = tenant["id"].as_str().unwrap();
 
@@ -165,11 +171,14 @@ async fn time_range_filter() {
             .any(|e| e["target_id"] == project)
     );
 
-    // Querying a time range in the past should return nothing for this event.
+    // Querying a time range that ends before the event should return nothing.
     let old_to = (chrono::Utc::now() - chrono::Duration::hours(1))
         .to_rfc3339_opts(SecondsFormat::Millis, true);
-    let (status, logs) =
-        query_audit_logs(&app, &format!("action=service_token.created&to={old_to}")).await;
+    let (status, logs) = query_audit_logs(
+        &app,
+        &format!("action=service_token.created&from={before}&to={old_to}"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         !logs
