@@ -39,6 +39,15 @@ fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
+/// Constant-time comparison of two equal-length hex strings.
+fn constant_time_eq_str(a: &str, b: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    if a.len() != b.len() {
+        return false;
+    }
+    a.as_bytes().ct_eq(b.as_bytes()).into()
+}
+
 fn build_response(api_key: &ApiKey) -> IntrospectResponse {
     IntrospectResponse {
         active: true,
@@ -192,6 +201,13 @@ impl ApiKeyVerifier {
         }
         match self.store.find_by_hash(&key_hash).await {
             Ok(Some(api_key)) => {
+                // Defense in depth: the store lookup is by hash, but perform a
+                // constant-time comparison to avoid any case where a
+                // case-insensitive or partial match could be accepted.
+                if !constant_time_eq_str(&api_key.key_hash, &key_hash) {
+                    tracing::warn!("API key hash mismatch after DB lookup");
+                    return IntrospectResponse::inactive();
+                }
                 if api_key.revoked_at.is_some() {
                     return IntrospectResponse::inactive();
                 }
@@ -206,7 +222,10 @@ impl ApiKeyVerifier {
                 response
             }
             Ok(None) => IntrospectResponse::inactive(),
-            Err(_) => IntrospectResponse::inactive(),
+            Err(e) => {
+                tracing::error!(error = %e, "API key store lookup failed");
+                IntrospectResponse::inactive()
+            }
         }
     }
 }
@@ -264,11 +283,26 @@ impl ServiceTokenVerifier {
             return project_str.parse().ok();
         }
         match self.store.find_by_hash(&token_hash).await {
-            Ok(Some(project)) => {
-                self.cache.set(&cache_key, &project.to_string(), 60).await;
-                Some(project)
+            Ok(Some(service_token)) => {
+                // Constant-time comparison to avoid leaking information about
+                // which hash prefix matched.
+                if !constant_time_eq_str(&service_token.token_hash, &token_hash) {
+                    tracing::warn!("Service token hash mismatch after DB lookup");
+                    return None;
+                }
+                if !service_token.is_active() {
+                    return None;
+                }
+                self.cache
+                    .set(&cache_key, &service_token.project.to_string(), 60)
+                    .await;
+                Some(service_token.project)
             }
-            _ => None,
+            Ok(None) => None,
+            Err(e) => {
+                tracing::error!(error = %e, "Service token store lookup failed");
+                None
+            }
         }
     }
 
@@ -425,5 +459,28 @@ mod tests {
         let result = sha256_hex(b"test");
         assert_eq!(result, result.to_lowercase());
         assert_eq!(result.len(), 64);
+    }
+
+    #[test]
+    fn constant_time_eq_detects_differences() {
+        assert!(constant_time_eq_str("abc", "abc"));
+        assert!(!constant_time_eq_str("abc", "abd"));
+        assert!(!constant_time_eq_str("abc", "ab"));
+        assert!(!constant_time_eq_str("", "x"));
+    }
+
+    #[test]
+    fn compute_cache_ttl_for_already_expired() {
+        let past = Utc::now() - chrono::Duration::seconds(10);
+        assert_eq!(compute_cache_ttl(Some(past)), 0);
+    }
+
+    #[test]
+    fn service_token_creator_produces_expected_format() {
+        let created = ServiceTokenCreator::create(Project::Pandaria).expect("create");
+        assert!(created.token.starts_with("st_"));
+        assert_eq!(created.token.len(), 67); // "st_" + 64 hex chars
+        assert_eq!(created.token_hash.len(), 64);
+        assert_eq!(created.project, Project::Pandaria);
     }
 }

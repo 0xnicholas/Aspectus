@@ -11,17 +11,50 @@
 
 use axum::http::HeaderMap;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use aspectus_auth::password::PasswordHasher;
+use std::sync::OnceLock;
+
+use aspectus_auth::password::{PasswordHasher, validate_password};
 use aspectus_core::identity::IdentityType;
-use aspectus_core::store::{AuditLogStore, RefreshTokenStore};
+use aspectus_core::store::{AuditLogStore, RefreshTokenStore, UserStore};
 
 use crate::AppState;
 use crate::error::ProblemDetails;
+
+// ── Account lockout configuration ───────────────────────────────
+
+#[derive(Debug, Clone, Copy)]
+struct LockoutConfig {
+    /// Number of consecutive failed logins before the account is locked.
+    threshold: i32,
+    /// How long the account stays locked (seconds).
+    duration_secs: i64,
+}
+
+impl LockoutConfig {
+    fn from_env() -> Self {
+        Self {
+            threshold: std::env::var("ASPECTUS_LOGIN_LOCKOUT_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(5),
+            duration_secs: std::env::var("ASPECTUS_LOGIN_LOCKOUT_DURATION_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1800),
+        }
+    }
+}
+
+static LOCKOUT_CONFIG: OnceLock<LockoutConfig> = OnceLock::new();
+
+fn lockout_config() -> &'static LockoutConfig {
+    LOCKOUT_CONFIG.get_or_init(LockoutConfig::from_env)
+}
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -111,18 +144,92 @@ pub async fn login(
     // Look up user by (tenant_id, email) — ADR-016.
     // Same email can exist in multiple tenants (UNIQUE (tenant_id, email)),
     // so an email-only lookup is ambiguous.
-    let (user_id, tenant_id) = match sqlx::query_as::<_, (String, String, String)>(
-        "SELECT id, tenant_id, password_hash FROM users WHERE tenant_id = $1 AND email = $2",
+    let (user_id, tenant_id, is_suspended) = match sqlx::query_as::<
+        _,
+        (String, String, String, Option<DateTime<Utc>>, i32, bool),
+    >(
+        "SELECT id, tenant_id, password_hash, locked_until, failed_login_attempts, is_suspended \
+         FROM users WHERE tenant_id = $1 AND email = $2",
     )
     .bind(&login_req.tenant_id)
     .bind(&login_req.email)
     .fetch_optional(&state.pool)
     .await
     {
-        Ok(Some((id, tid, hash))) => {
+        Ok(Some((id, tid, hash, locked_until, attempts, suspended))) => {
+            // Account-level lockout check happens before password verification.
+            if let Some(until) = locked_until
+                && until > Utc::now()
+            {
+                audit_auth_event(
+                    &state,
+                    AuditAuthParams {
+                        tenant_id: tid.clone(),
+                        actor_id: id.clone(),
+                        actor_type: IdentityType::User,
+                        action: "user.login_blocked".into(),
+                        target_type: "user".into(),
+                        target_id: id.clone(),
+                        metadata: serde_json::json!({
+                            "reason": "account_locked",
+                            "locked_until": until,
+                            "failed_login_attempts": attempts,
+                            "ip": ip,
+                        }),
+                    },
+                )
+                .await;
+                return ProblemDetails::unauthorized(
+                    "Account is temporarily locked due to too many failed login attempts",
+                    "/login",
+                )
+                .into_response();
+            }
+
             match PasswordHasher::verify(&login_req.password, &hash) {
-                Ok(true) => (id, tid),
+                Ok(true) => (id, tid, suspended),
                 _ => {
+                    let cfg = lockout_config();
+                    let (new_attempts, new_lock) = match state
+                        .user_store
+                        .record_failed_login(&id, cfg.threshold, cfg.duration_secs)
+                        .await
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::error!(error = %e, user_id = %id, "Failed to record failed login");
+                            return ProblemDetails::internal_error(
+                                "Authentication service temporarily unavailable",
+                            )
+                            .into_response();
+                        }
+                    };
+
+                    audit_auth_event(
+                        &state,
+                        AuditAuthParams {
+                            tenant_id: tid.clone(),
+                            actor_id: id.clone(),
+                            actor_type: IdentityType::User,
+                            action: "user.login_failed".into(),
+                            target_type: "user".into(),
+                            target_id: id.clone(),
+                            metadata: serde_json::json!({
+                                "failed_login_attempts": new_attempts,
+                                "ip": ip,
+                            }),
+                        },
+                    )
+                    .await;
+
+                    if new_lock.is_some() {
+                        return ProblemDetails::unauthorized(
+                            "Account is temporarily locked due to too many failed login attempts",
+                            "/login",
+                        )
+                        .into_response();
+                    }
+
                     // Failed login — ambiguous message, no user/email leak
                     return ProblemDetails::with_code_instance(
                         aspectus_core::ErrorCode::InvalidCredentials,
@@ -156,12 +263,10 @@ pub async fn login(
         }
     };
 
-    // Check if suspended
-    let is_suspended: bool = sqlx::query_scalar("SELECT is_suspended FROM users WHERE id = $1")
-        .bind(&user_id)
-        .fetch_one(&state.pool)
-        .await
-        .unwrap_or(false);
+    // Successful login: clear any stale failed-login state.
+    if let Err(e) = state.user_store.clear_failed_logins(&user_id).await {
+        tracing::error!(error = %e, user_id = %user_id, "Failed to clear failed logins");
+    }
 
     if is_suspended {
         audit_auth_event(
@@ -267,11 +372,11 @@ pub async fn register(
         .into_response();
     }
 
-    // Validate password strength (min 8 chars)
-    if reg.password.len() < 8 {
+    // Validate password strength against the configured policy.
+    if let Err(msg) = validate_password(&reg.password) {
         return ProblemDetails::with_code_errors(
             aspectus_core::ErrorCode::PasswordTooShort,
-            "Password must be at least 8 characters",
+            msg,
             vec![],
         )
         .into_response();
@@ -280,14 +385,23 @@ pub async fn register(
     // Check email uniqueness — scoped to tenant (ADR-016)
     // Schema: UNIQUE (tenant_id, email) allows same email across different tenants.
     // Previously this query omitted tenant_id, incorrectly blocking cross-tenant registration.
-    let exists: bool = sqlx::query_scalar(
+    let exists: bool = match sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM users WHERE tenant_id = $1 AND email = $2)",
     )
     .bind(&reg.tenant_id)
     .bind(&reg.email)
     .fetch_one(&state.pool)
     .await
-    .unwrap_or(false);
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "Email uniqueness check failed");
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
+        }
+    };
 
     if exists {
         // Don't leak whether email exists — use same error as login
@@ -316,11 +430,20 @@ pub async fn register(
     // If the tenant doesn't exist, return 404 with a clear message.
     let tenant_id = reg.tenant_id;
     let tenant_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)")
+        match sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM tenants WHERE id = $1)")
             .bind(&tenant_id)
             .fetch_one(&state.pool)
             .await
-            .unwrap_or(false);
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(error = %e, "Tenant existence check failed");
+                return ProblemDetails::internal_error(
+                    "Authentication service temporarily unavailable",
+                )
+                .into_response();
+            }
+        };
 
     if !tenant_exists {
         tracing::warn!(
@@ -368,14 +491,20 @@ pub async fn register(
     // ADR-016: Assign default Role so the new user has at least some scopes.
     // We look up the role with is_default = true AND type IN ('user', 'both').
     // Failure here is non-fatal — admin can assign roles later.
-    let default_role_id: Option<String> = sqlx::query_scalar(
+    let default_role_id: Option<String> = match sqlx::query_scalar(
         "SELECT id FROM roles
          WHERE is_default = true AND type IN ('user', 'both')
          LIMIT 1",
     )
     .fetch_optional(&state.pool)
     .await
-    .unwrap_or(None);
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "Default role lookup failed; continuing without role");
+            None
+        }
+    };
 
     if let Some(role_id) = default_role_id {
         let users_role_id = crate::util::generate_id();
@@ -522,7 +651,11 @@ pub async fn forgot_password(
 
     // Generate reset token
     let mut raw = [0u8; 32];
-    getrandom::getrandom(&mut raw).unwrap_or_default();
+    if let Err(e) = getrandom::getrandom(&mut raw) {
+        tracing::error!(error = %e, "Failed to generate password reset token");
+        return ProblemDetails::internal_error("Authentication service temporarily unavailable")
+            .into_response();
+    }
     let token = hex::encode(raw);
     let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
     let expires_at = Utc::now() + chrono::Duration::hours(1);
@@ -587,17 +720,16 @@ pub async fn reset_password(
     State(state): State<AppState>,
     Json(req): Json<ResetPasswordRequest>,
 ) -> impl IntoResponse {
-    // Validate password strength
-    if req.new_password.len() < 8 {
-        return ProblemDetails::validation_failed("Password must be at least 8 characters", vec![])
-            .into_response();
+    // Validate password strength against the configured policy.
+    if let Err(msg) = validate_password(&req.new_password) {
+        return ProblemDetails::validation_failed(msg, vec![]).into_response();
     }
 
     // Hash the incoming token to look it up
     let token_hash = hex::encode(Sha256::digest(req.token.as_bytes()));
 
     // Atomically claim the token (mark used)
-    let user_id: Option<String> = sqlx::query_scalar(
+    let user_id: Option<String> = match sqlx::query_scalar(
         "UPDATE password_reset_tokens SET used = true \
          WHERE token_hash = $1 AND used = false AND expires_at > NOW() \
          RETURNING user_id",
@@ -605,7 +737,16 @@ pub async fn reset_password(
     .bind(&token_hash)
     .fetch_optional(&state.pool)
     .await
-    .unwrap_or(None);
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, "Reset token lookup failed");
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
+        }
+    };
 
     let user_id = match user_id {
         Some(id) => id,
@@ -637,11 +778,18 @@ pub async fn reset_password(
     }
 
     // Audit
-    let tenant_id: Option<String> = sqlx::query_scalar("SELECT tenant_id FROM users WHERE id = $1")
-        .bind(&user_id)
-        .fetch_optional(&state.pool)
-        .await
-        .unwrap_or(None);
+    let tenant_id: Option<String> =
+        match sqlx::query_scalar("SELECT tenant_id FROM users WHERE id = $1")
+            .bind(&user_id)
+            .fetch_optional(&state.pool)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(error = %e, user_id = %user_id, "Tenant lookup failed for audit");
+                None
+            }
+        };
 
     if let Some(tid) = tenant_id {
         audit_auth_event(

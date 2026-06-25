@@ -36,7 +36,7 @@ async fn setup_user(app: &axum::Router) -> (String, String, String, String) {
             json!({
                 "tenant_id": &tenant_id,
                 "email": &email,
-                "password": "oauth-password-123",
+                "password": "Oauth-password-123",
                 "display_name": "OAuth Test User"
             })
             .to_string(),
@@ -119,7 +119,7 @@ async fn authorize_invalid_client_returns_422() {
             json!({
                 "email": email,
                 "tenant_id": &tenant_id,
-                "password": "oauth-password-123",
+                "password": "Oauth-password-123",
                 "client_id": "nonexistent-client",
                 "redirect_uri": "https://example.com/cb"
             })
@@ -143,7 +143,7 @@ async fn authorize_invalid_redirect_uri_returns_422() {
             json!({
                 "email": email,
                 "tenant_id": &tenant_id,
-                "password": "oauth-password-123",
+                "password": "Oauth-password-123",
                 "client_id": client_id,
                 "redirect_uri": "https://evil.com/steal"
             })
@@ -168,7 +168,7 @@ async fn full_oauth2_authorization_code_flow() {
             json!({
                 "email": &email,
                 "tenant_id": &tenant_id,
-                "password": "oauth-password-123",
+                "password": "Oauth-password-123",
                 "client_id": &client_id,
                 "redirect_uri": "https://example.com/cb"
             })
@@ -191,7 +191,8 @@ async fn full_oauth2_authorization_code_flow() {
                 "grant_type": "authorization_code",
                 "code": code,
                 "client_id": client_id,
-                "client_secret": client_secret
+                "client_secret": client_secret,
+                "redirect_uri": "https://example.com/cb"
             })
             .to_string(),
         ))
@@ -218,7 +219,7 @@ async fn authorization_code_is_one_time_use() {
         .header("Content-Type", "application/json")
         .body(Body::from(
             json!({
-                "email": &email, "tenant_id": &tenant_id, "password": "oauth-password-123",
+                "email": &email, "tenant_id": &tenant_id, "password": "Oauth-password-123",
                 "client_id": &client_id, "redirect_uri": "https://example.com/cb"
             })
             .to_string(),
@@ -234,7 +235,7 @@ async fn authorization_code_is_one_time_use() {
     // First exchange — succeeds
     let req = Request::builder().uri("/oauth/token").method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id,"client_secret":&client_secret}).to_string()))
+        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id,"client_secret":&client_secret,"redirect_uri":"https://example.com/cb"}).to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -242,7 +243,7 @@ async fn authorization_code_is_one_time_use() {
     // Second exchange — must fail
     let req = Request::builder().uri("/oauth/token").method("POST")
         .header("Content-Type", "application/json")
-        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id,"client_secret":&client_secret}).to_string()))
+        .body(Body::from(json!({"grant_type":"authorization_code","code":&code,"client_id":&client_id,"client_secret":&client_secret,"redirect_uri":"https://example.com/cb"}).to_string()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -259,4 +260,203 @@ async fn token_unsupported_grant_type_returns_422() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+fn s256_challenge(verifier: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(verifier.as_bytes()))
+}
+
+#[tokio::test]
+async fn pkce_authorize_and_token_success() {
+    let (app, _) = common::build_app().await.unwrap();
+    let (tenant_id, email, client_id, client_secret) = setup_user(&app).await;
+    let verifier = "a-long-random-verifier-string-0123456789";
+    let challenge = s256_challenge(verifier);
+
+    let req = Request::builder()
+        .uri("/authorize")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "email": &email,
+                "tenant_id": &tenant_id,
+                "password": "Oauth-password-123",
+                "client_id": &client_id,
+                "redirect_uri": "https://example.com/cb",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let auth_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let code = auth_resp["code"].as_str().unwrap();
+
+    let req = Request::builder()
+        .uri("/oauth/token")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": "https://example.com/cb",
+                "code_verifier": verifier
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn pkce_token_without_verifier_rejected() {
+    let (app, _) = common::build_app().await.unwrap();
+    let (tenant_id, email, client_id, client_secret) = setup_user(&app).await;
+    let verifier = "a-long-random-verifier-string-0123456789";
+    let challenge = s256_challenge(verifier);
+
+    let req = Request::builder()
+        .uri("/authorize")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "email": &email,
+                "tenant_id": &tenant_id,
+                "password": "Oauth-password-123",
+                "client_id": &client_id,
+                "redirect_uri": "https://example.com/cb",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let auth_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let code = auth_resp["code"].as_str().unwrap();
+
+    let req = Request::builder()
+        .uri("/oauth/token")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": "https://example.com/cb"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn pkce_token_with_wrong_verifier_rejected() {
+    let (app, _) = common::build_app().await.unwrap();
+    let (tenant_id, email, client_id, client_secret) = setup_user(&app).await;
+    let verifier = "a-long-random-verifier-string-0123456789";
+    let challenge = s256_challenge(verifier);
+
+    let req = Request::builder()
+        .uri("/authorize")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "email": &email,
+                "tenant_id": &tenant_id,
+                "password": "Oauth-password-123",
+                "client_id": &client_id,
+                "redirect_uri": "https://example.com/cb",
+                "code_challenge": challenge,
+                "code_challenge_method": "S256"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let auth_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let code = auth_resp["code"].as_str().unwrap();
+
+    let req = Request::builder()
+        .uri("/oauth/token")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": "https://example.com/cb",
+                "code_verifier": "wrong-verifier"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn token_redirect_uri_mismatch_rejected() {
+    let (app, _) = common::build_app().await.unwrap();
+    let (tenant_id, email, client_id, client_secret) = setup_user(&app).await;
+
+    let req = Request::builder()
+        .uri("/authorize")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "email": &email,
+                "tenant_id": &tenant_id,
+                "password": "Oauth-password-123",
+                "client_id": &client_id,
+                "redirect_uri": "https://example.com/cb"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let auth_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let code = auth_resp["code"].as_str().unwrap();
+
+    let req = Request::builder()
+        .uri("/oauth/token")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": "https://evil.com/steal"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }

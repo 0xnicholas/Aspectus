@@ -23,11 +23,12 @@ pub struct LoggingEmailSender;
 
 #[async_trait]
 impl EmailSender for LoggingEmailSender {
-    async fn send_password_reset(&self, email: &str, reset_url: &str) -> Result<(), String> {
+    async fn send_password_reset(&self, email: &str, _reset_url: &str) -> Result<(), String> {
+        // NEVER log _reset_url — it contains a one-time secret token.
+        // Logging transport records that a reset was dispatched, not the link.
         tracing::info!(
             email = %email,
-            reset_url = %reset_url,
-            "Password reset email (logging transport)"
+            "Password reset email dispatched (logging transport; URL omitted)"
         );
         Ok(())
     }

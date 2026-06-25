@@ -20,7 +20,7 @@ async fn create_tenant(app: &axum::Router, name: &str) -> String {
         .body(Body::from(json!({"name": name}).to_string()))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let tenant: serde_json::Value = serde_json::from_slice(&body).unwrap();
     tenant["id"].as_str().unwrap().to_string()
 }
@@ -100,7 +100,7 @@ async fn user_create_and_get() {
             json!({
                 "tenant_id": &tenant_id,
                 "email": &email,
-                "password": "testpass123",
+                "password": "Testpass123",
                 "display_name": "Test User"
             })
             .to_string(),
@@ -108,7 +108,7 @@ async fn user_create_and_get() {
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let user: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let user_id = user["id"].as_str().unwrap();
 
@@ -154,7 +154,7 @@ async fn user_email_validation() {
             json!({
                 "tenant_id": tenant_id,
                 "email": "not-an-email",
-                "password": "testpass123"
+                "password": "Testpass123"
             })
             .to_string(),
         ))
@@ -177,13 +177,13 @@ async fn user_suspend_and_unsuspend() {
         .header("Authorization", &common::admin_service_token_header())
         .body(Body::from(
             json!({
-                "tenant_id": &tenant_id, "email": &email, "password": "testpass123"
+                "tenant_id": &tenant_id, "email": &email, "password": "Testpass123"
             })
             .to_string(),
         ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let user: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let user_id = user["id"].as_str().unwrap();
 
@@ -206,7 +206,7 @@ async fn user_suspend_and_unsuspend() {
         .body(Body::empty())
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let user: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(user["is_suspended"], true);
 
@@ -243,7 +243,7 @@ async fn api_key_create_and_revoke() {
         ))
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let sa: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let sa_id = sa["id"].as_str().unwrap();
 
@@ -264,7 +264,7 @@ async fn api_key_create_and_revoke() {
         .unwrap();
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let key_resp: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let api_key = key_resp["key"].as_str().unwrap();
     let key_id = key_resp["id"].as_str().unwrap();
@@ -291,7 +291,7 @@ async fn management_endpoints_require_auth() {
         (
             "POST",
             "/users",
-            json!({"tenant_id":"t1","email":"a@b.com","password":"test12345"}),
+            json!({"tenant_id":"t1","email":"a@b.com","password":"Test12345"}),
         ),
         (
             "POST",
@@ -330,9 +330,105 @@ async fn roles_list_endpoint() {
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(resp.into_body(), 4096).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
     let roles: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(roles.is_array());
+}
+
+#[tokio::test]
+async fn user_change_password_requires_current_password() {
+    let (app, _) = common::build_app().await.unwrap();
+    let tenant_id = create_tenant(&app, "change-pw").await;
+
+    let req = Request::builder()
+        .uri("/users")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .header("Authorization", &common::admin_service_token_header())
+        .body(Body::from(
+            json!({
+                "tenant_id": tenant_id,
+                "email": "pwuser@example.com",
+                "password": "OldPass123!"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body = axum::body::to_bytes(resp.into_body(), 65536).await.unwrap();
+    let user: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let user_id = user["id"].as_str().unwrap();
+
+    // Wrong current password → 401
+    let req = Request::builder()
+        .uri(format!("/users/{user_id}/change-password"))
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({"current_password": "wrong", "new_password": "NewPass456!"}).to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // Too short new password → 422
+    let req = Request::builder()
+        .uri(format!("/users/{user_id}/change-password"))
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({"current_password": "OldPass123!", "new_password": "short"}).to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Correct current password → 204
+    let req = Request::builder()
+        .uri(format!("/users/{user_id}/change-password"))
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({"current_password": "OldPass123!", "new_password": "NewPass456!"}).to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    // Old password no longer works for login
+    let req = Request::builder()
+        .uri("/login")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "email": "pwuser@example.com",
+                "password": "OldPass123!",
+                "tenant_id": tenant_id
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+    // New password works
+    let req = Request::builder()
+        .uri("/login")
+        .method("POST")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            json!({
+                "email": "pwuser@example.com",
+                "password": "NewPass456!",
+                "tenant_id": tenant_id
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]

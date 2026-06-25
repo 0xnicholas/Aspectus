@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::project::Project;
+use crate::{error::CoreError, project::Project, scope::Scope};
 
 /// Long-lived credential scoped to a single (tenant, project, scopes) tuple.
 ///
@@ -23,6 +23,32 @@ pub struct ApiKey {
     /// `None` = active, `Some` = revoked at this timestamp.
     pub revoked_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+}
+
+impl ApiKey {
+    /// Validate that all attached scopes are well-formed and belong to this key's project.
+    pub fn validate_scopes(&self) -> Result<(), CoreError> {
+        if self.scopes.len() > Scope::MAX_SCOPES_PER_KEY {
+            return Err(CoreError::Validation(format!(
+                "too many scopes: {} exceeds limit {}",
+                self.scopes.len(),
+                Scope::MAX_SCOPES_PER_KEY
+            )));
+        }
+        for scope in &self.scopes {
+            Scope::validate(scope)
+                .map_err(|e| CoreError::Validation(format!("invalid scope '{scope}': {e}")))?;
+            let scope_project = Scope::project(scope)
+                .map_err(|e| CoreError::Validation(format!("invalid scope '{scope}': {e}")))?;
+            if scope_project != self.project {
+                return Err(CoreError::Validation(format!(
+                    "scope '{scope}' belongs to project '{scope_project}' but key project is '{}'",
+                    self.project
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Returned to the caller once when an API Key is created.

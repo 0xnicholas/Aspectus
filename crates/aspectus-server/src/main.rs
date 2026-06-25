@@ -6,6 +6,7 @@ use axum::http::header;
 use axum::{
     Router,
     extract::DefaultBodyLimit,
+    http::HeaderValue,
     middleware,
     routing::{delete, get, post, put},
 };
@@ -20,6 +21,7 @@ use aspectus_auth::{
     ApiKeyCreator, ApiKeyVerifier, RedisCache, ServiceTokenVerifier, TokenVerifier,
 };
 use aspectus_server::AppState;
+use aspectus_server::cleanup::spawn_cleanup_task;
 use aspectus_server::config::Config;
 use aspectus_server::db;
 use aspectus_server::db::{
@@ -166,16 +168,19 @@ async fn main() -> anyhow::Result<()> {
         pool: pool.clone(),
     };
 
-    let svc_verifier = svc_token_verifier;
+    spawn_cleanup_task(pool.clone());
+
+    let auth_svc_verifier = svc_token_verifier.clone();
     let auth_layer = middleware::from_fn(
         move |mut req: axum::extract::Request, next: middleware::Next| {
-            let verifier = svc_verifier.clone();
+            let verifier = auth_svc_verifier.clone();
             async move {
                 req.extensions_mut().insert(verifier);
                 service_token_auth(req, next).await
             }
         },
     );
+    let revoke_auth_svc_verifier = svc_token_verifier.clone();
 
     let authorize_rl = authorize_limiter.clone();
     let login_rl = authorize_limiter.clone();
@@ -183,6 +188,7 @@ async fn main() -> anyhow::Result<()> {
     let login_lookup_rl = authorize_limiter.clone();
     let password_rl = password_limiter.clone();
     let password_rl2 = password_limiter.clone();
+    let password_rl3 = password_limiter.clone();
     let token_rl = token_limiter.clone();
     let token_rl2 = token_limiter.clone();
     let introspect_rl = introspect_limiter.clone();
@@ -218,10 +224,26 @@ async fn main() -> anyhow::Result<()> {
             "/users/{id}/suspend",
             put(aspectus_server::routes::users::suspend),
         )
+        .route(
+            "/users/{id}/unlock",
+            post(aspectus_server::routes::users::unlock),
+        )
+        .route(
+            "/users/{id}/scopes",
+            get(aspectus_server::routes::users::scopes),
+        )
         .route("/roles", get(aspectus_server::routes::roles::list))
+        .route("/roles", post(aspectus_server::routes::roles::create))
+        .route("/roles/{id}", get(aspectus_server::routes::roles::get))
+        .route("/roles/{id}", put(aspectus_server::routes::roles::update))
+        .route(
+            "/roles/{id}",
+            delete(aspectus_server::routes::roles::delete),
+        )
         .route(
             "/users/{id}/roles",
-            post(aspectus_server::routes::roles::assign),
+            get(aspectus_server::routes::users::list_roles)
+                .post(aspectus_server::routes::roles::assign),
         )
         .route(
             "/users/{id}/roles/{role_id}",
@@ -277,6 +299,23 @@ async fn main() -> anyhow::Result<()> {
 
     // Public + introspect routes (with per-route rate limiting)
     let app = Router::new()
+        .route(
+            "/openapi.yaml",
+            get(aspectus_server::routes::docs::openapi_spec),
+        )
+        .route("/docs", get(aspectus_server::routes::docs::swagger_ui))
+        .route(
+            "/token/revoke",
+            post(aspectus_server::routes::token::revoke).route_layer(middleware::from_fn(
+                move |mut req: axum::extract::Request, next: middleware::Next| {
+                    let verifier = revoke_auth_svc_verifier.clone();
+                    async move {
+                        req.extensions_mut().insert(verifier);
+                        service_token_auth(req, next).await
+                    }
+                },
+            )),
+        )
         .route(
             "/introspect",
             post(aspectus_server::routes::introspect::handle).route_layer(middleware::from_fn(
@@ -365,6 +404,19 @@ async fn main() -> anyhow::Result<()> {
                 .layer(DefaultBodyLimit::max(2048)),
         )
         .route(
+            "/users/{id}/change-password",
+            post(aspectus_server::routes::users::change_password)
+                .route_layer(middleware::from_fn(move |req, next| {
+                    rate_limit::rate_limit_layer(
+                        password_rl3.clone(),
+                        rate_limit::ip_key,
+                        req,
+                        next,
+                    )
+                }))
+                .layer(DefaultBodyLimit::max(4096)),
+        )
+        .route(
             "/oauth/token",
             post(aspectus_server::routes::oauth::token)
                 .route_layer(middleware::from_fn(move |req, next| {
@@ -388,7 +440,7 @@ async fn main() -> anyhow::Result<()> {
             "/admin",
             ServeDir::new("console/dist").fallback(ServeFile::new("console/dist/index.html")),
         )
-        .layer(CorsLayer::permissive())
+        .layer(build_cors_layer())
         .layer(DefaultBodyLimit::max(1024 * 16))
         .layer(middleware::from_fn(add_security_headers))
         .layer(TraceLayer::new_for_http());
@@ -401,10 +453,40 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
+}
+
+/// Build the CORS layer based on environment.
+///
+/// - If `ASPECTUS_CONSOLE_ORIGIN` is set, only that origin is allowed.
+/// - In debug builds with no origin configured, fall back to permissive for
+///   local development.
+/// - Otherwise, deny cross-origin requests by default.
+fn build_cors_layer() -> CorsLayer {
+    if let Ok(origin) = std::env::var("ASPECTUS_CONSOLE_ORIGIN") {
+        if let Ok(header_value) = origin.parse::<HeaderValue>() {
+            return CorsLayer::new()
+                .allow_origin(header_value)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any);
+        }
+        tracing::warn!(
+            origin = %origin,
+            "ASPECTUS_CONSOLE_ORIGIN is not a valid HTTP header value; using default CORS"
+        );
+    }
+
+    if cfg!(debug_assertions) {
+        CorsLayer::permissive()
+    } else {
+        CorsLayer::new()
+    }
 }
 
 async fn add_security_headers(

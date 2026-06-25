@@ -3,6 +3,7 @@
 //! axum-based HTTP service providing the `/introspect` endpoint,
 //! management APIs, and the `/health` endpoint.
 
+pub mod cleanup;
 pub mod config;
 pub mod db;
 pub mod email;

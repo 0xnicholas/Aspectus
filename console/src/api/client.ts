@@ -60,10 +60,13 @@ export const api = {
   // Users
   listUsers: (tenant_id: string) =>
     request<any[]>(`/users?tenant_id=${tenant_id}`),
+  getUser: (id: string) => request<any>(`/users/${id}`),
   createUser: (data: any) =>
     request<any>("/users", { method: "POST", body: JSON.stringify(data) }),
   suspendUser: (id: string, suspended: boolean) =>
     request<any>(`/users/${id}/suspend`, { method: "PUT", body: JSON.stringify({ suspended }) }),
+  unlockUser: (id: string) =>
+    request<void>(`/users/${id}/unlock`, { method: "POST" }),
 
   // API Keys
   listApiKeys: (service_account_id: string) =>
@@ -107,8 +110,17 @@ export const api = {
     offset?: number;
   }) => request<any[]>(`/audit-logs${qs(filter)}`),
 
+  // User scopes & roles
+  getUserScopes: (id: string) => request<{ scopes: string[] }>(`/users/${id}/scopes`),
+  getUserRoles: (id: string) => request<any[]>(`/users/${id}/roles`),
+
   // Roles
   listRoles: () => request<any[]>("/roles"),
+  createRole: (data: { name: string; description?: string; type: string; scopes: string[] }) =>
+    request<any>("/roles", { method: "POST", body: JSON.stringify(data) }),
+  updateRole: (id: string, data: { description?: string; type: string; scopes: string[] }) =>
+    request<any>(`/roles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteRole: (id: string) => request<void>(`/roles/${id}`, { method: "DELETE" }),
   assignRole: (userId: string, roleId: string) =>
     request<any>(`/users/${userId}/roles`, { method: "POST", body: JSON.stringify({ role_id: roleId }) }),
   removeRole: (userId: string, roleId: string) =>

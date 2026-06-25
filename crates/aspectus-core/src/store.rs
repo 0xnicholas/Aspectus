@@ -103,11 +103,15 @@ pub trait AuditLogStore: Send + Sync {
 /// Persistence layer for ServiceToken lookup and lifecycle management.
 #[async_trait]
 pub trait ServiceTokenStore: Send + Sync {
-    /// Look up a token by hash, returning the project only if the token is active.
+    /// Look up a token by hash, returning the full row only if the token is active.
+    ///
+    /// Callers must verify the hash with a constant-time comparison and check
+    /// [`ServiceToken::is_active`] themselves; the store only filters out rows
+    /// whose `revoked_at` is set.
     async fn find_by_hash(
         &self,
         token_hash: &str,
-    ) -> Result<Option<Project>, crate::error::CoreError>;
+    ) -> Result<Option<crate::service_token::ServiceToken>, crate::error::CoreError>;
 
     /// List all stored service tokens, including revoked ones.
     async fn list(&self) -> Result<Vec<ServiceToken>, crate::error::CoreError>;
@@ -157,6 +161,26 @@ pub trait UserStore: Send + Sync {
         id: &str,
         suspended: bool,
     ) -> Result<bool, crate::error::CoreError>;
+
+    async fn set_password(
+        &self,
+        id: &str,
+        password_hash: &str,
+    ) -> Result<bool, crate::error::CoreError>;
+
+    /// Atomically increment failed login attempts and, if the new count reaches
+    /// `threshold`, set `locked_until` to `now + lockout_duration_secs`.
+    /// Returns the new attempt count and current lockout time (if any).
+    async fn record_failed_login(
+        &self,
+        id: &str,
+        threshold: i32,
+        lockout_duration_secs: i64,
+    ) -> Result<(i32, Option<chrono::DateTime<chrono::Utc>>), crate::error::CoreError>;
+
+    /// Clear failed login attempts and any active lockout. Called on successful
+    /// login or when an administrator manually unlocks an account.
+    async fn clear_failed_logins(&self, id: &str) -> Result<bool, crate::error::CoreError>;
 }
 
 /// Persistence layer for OAuth2 authorization codes (v0.9.0).

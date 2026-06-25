@@ -52,7 +52,11 @@ curl http://localhost:3100/health
 |------|------|:--:|------|
 | `/health` | GET | 无 | 健康检查 |
 | `/metrics` | GET | 无 | Prometheus 指标 |
+| `/openapi.yaml` | GET | 无 | OpenAPI 3.0 文档 |
+| `/docs` | GET | 无 | Swagger UI 交互式文档 |
 | `/introspect` | POST | Service Token | Token 自省 (RFC 7662) |
+| `/token` | POST | Service Token | 签发 JWT/Opaque access token |
+| `/token/revoke` | POST | Service Token | 吊销 API Key / Opaque token |
 | `/login/lookup` | POST | 无 | 两步登录第一步：邮箱 → 返回关联租户列表（ADR-016） |
 | `/login` | POST | 无 | 用户登录 (email+password+tenant_id → JWT，ADR-016 两步法第二步) |
 | `/register` | POST | 无 | 用户注册（需 `ASPECTUS_REGISTRATION_ENABLED=true`，**demo/dev only**；生产用 `POST /users`） |
@@ -67,11 +71,15 @@ curl http://localhost:3100/health
 | `/users` | POST/GET | Service Token | 用户管理 |
 | `/users/{id}` | GET | Service Token | 用户详情 |
 | `/users/{id}/suspend` | PUT | Service Token | 挂起/恢复用户 |
-| `/users/{id}/roles` | POST/DELETE | Service Token | 角色分配 |
-| `/roles` | GET | Service Token | 角色列表 |
+| `/users/{id}/scopes` | GET | Service Token | 用户有效 scope 列表 |
+| `/users/{id}/roles` | GET/POST/DELETE | Service Token | 查询/分配/移除用户角色 |
+| `/users/{id}/change-password` | POST | 无 | 用户自助修改密码（需当前密码，受 rate limit） |
+| `/roles` | GET/POST | Service Token | 角色列表 / 创建自定义角色 |
+| `/roles/{id}` | GET/PUT/DELETE | Service Token | 角色详情 / 更新 / 删除自定义角色 |
 | `/api-keys` | POST/GET | Service Token | API Key 管理 |
 | `/api-keys/{id}` | GET/DELETE | Service Token | 查询/吊销 Key |
 | `/service-tokens` | POST/GET | Admin Service Token | 生态项目 Service Token 管理 |
+| `/service-tokens/{project}` | GET/DELETE | Admin Service Token | 查询/吊销 Service Token |
 | `/service-tokens/{project}/rotate` | POST | Admin Service Token | 轮换 Service Token |
 | `/audit-logs` | GET | Admin Service Token | 审计日志查询 |
 | `/authorize` | POST | 无 | OAuth2 授权 |
@@ -123,7 +131,7 @@ curl -X POST http://localhost:3100/login \
   -H 'Content-Type: application/json' \
   -d '{
     "email": "alice@example.com",
-    "password": "secret123",
+    "password": "Secret123",
     "tenant_id": "org_acme",
     "client_id": "pandaria"
   }'
@@ -156,6 +164,22 @@ JWT payload 现在包含 `tenant_name` 声明，客户端可直接读取展示"A
 | `ot_*` | Opaque Token | 需吊销的短期凭证 |
 | `rt_*` | Refresh Token | OAuth2 刷新 |
 
+## 安全配置
+
+密码策略与登录锁定通过环境变量配置，所有变量均有默认值：
+
+| 环境变量 | 默认值 | 说明 |
+|----------|--------|------|
+| `ASPECTUS_PASSWORD_MIN_LENGTH` | `8` | 最小长度 |
+| `ASPECTUS_PASSWORD_REQUIRE_UPPERCASE` | `true` | 要求大写字母 |
+| `ASPECTUS_PASSWORD_REQUIRE_LOWERCASE` | `true` | 要求小写字母 |
+| `ASPECTUS_PASSWORD_REQUIRE_DIGIT` | `true` | 要求数字 |
+| `ASPECTUS_PASSWORD_REQUIRE_SPECIAL` | `false` | 要求特殊字符 |
+| `ASPECTUS_LOGIN_LOCKOUT_THRESHOLD` | `5` | 连续失败几次后锁定账户 |
+| `ASPECTUS_LOGIN_LOCKOUT_DURATION_SECS` | `1800` | 锁定持续时间（秒） |
+
+被锁定的账户可通过 `POST /users/{id}/unlock`（admin service token）手动解锁，或在锁定时间到期后自动解锁。
+
 ## 创建用户：Demo vs 生产
 
 **Demo/dev 路径**（`ASPECTUS_REGISTRATION_ENABLED=true`）：
@@ -169,7 +193,7 @@ curl -X POST http://localhost:3100/register \
   -H 'Content-Type: application/json' \
   -d '{
     "email": "alice@example.com",
-    "password": "secret123",
+    "password": "Secret123",
     "tenant_id": "org_acme"
   }'
 ```
@@ -187,7 +211,7 @@ curl -X POST http://localhost:3100/users \
   -H "Authorization: Bearer $SERVICE_TOKEN" \
   -d '{
     "email": "alice@example.com",
-    "password": "secret123",
+    "password": "Secret123",
     "tenant_id": "org_acme"
   }'
 

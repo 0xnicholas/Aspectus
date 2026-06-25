@@ -19,6 +19,9 @@ pub struct User {
     pub password_hash: Option<String>,
     pub display_name: Option<String>,
     pub is_suspended: bool,
+    #[serde(skip)]
+    pub failed_login_attempts: i32,
+    pub locked_until: Option<DateTime<Utc>>,
     pub last_sign_in_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,

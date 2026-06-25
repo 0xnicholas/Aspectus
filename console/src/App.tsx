@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Building2, UsersIcon, Key, Shield, Globe, ScrollText, UserCog, Lock } from "lucide-react";
+import { LayoutDashboard, Building2, UsersIcon, Key, Shield, Globe, ScrollText, UserCog, Lock, BookOpen } from "lucide-react";
 import { Dashboard } from "./pages/Dashboard";
 import { Tenants } from "./pages/Tenants";
 import { Users } from "./pages/Users";
@@ -11,6 +11,7 @@ import { AuditLogs } from "./pages/AuditLogs";
 import { ServiceTokens } from "./pages/ServiceTokens";
 import { TenantDetail } from "./pages/TenantDetail";
 import { ServiceAccountDetail } from "./pages/ServiceAccountDetail";
+import { UserDetail } from "./pages/UserDetail";
 
 const NAV = [
   { path: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -22,6 +23,7 @@ const NAV = [
   { path: "/clients", label: "OAuth2 Clients", icon: Globe },
   { path: "/service-tokens", label: "Service Tokens", icon: Lock },
   { path: "/audit-logs", label: "Audit Logs", icon: ScrollText },
+  { path: "/docs", label: "API Docs", icon: BookOpen, external: true },
 ];
 
 function Sidebar() {
@@ -34,15 +36,21 @@ function Sidebar() {
       </div>
       <nav className="flex-1 space-y-1 p-3">
         {NAV.map((item) => {
-          const active = location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path));
+          const active = !item.external && (location.pathname === item.path || (item.path !== "/" && location.pathname.startsWith(item.path)));
           const Icon = item.icon;
-          return (
+          const className = `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+            active ? "bg-sidebar-active text-white" : "hover:bg-sidebar-hover hover:text-white"
+          }`;
+          return item.external ? (
+            <a key={item.path} href={item.path} target="_blank" rel="noreferrer" className={className}>
+              <Icon size={18} />
+              {item.label}
+            </a>
+          ) : (
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                active ? "bg-sidebar-active text-white" : "hover:bg-sidebar-hover hover:text-white"
-              }`}
+              className={className}
             >
               <Icon size={18} />
               {item.label}
@@ -50,8 +58,18 @@ function Sidebar() {
           );
         })}
       </nav>
-      <div className="border-t border-white/10 p-4 text-xs text-gray-500">v0.1</div>
+      <div className="border-t border-white/10 p-4 text-xs text-gray-500">v{import.meta.env.PACKAGE_VERSION || "dev"}</div>
     </aside>
+  );
+}
+
+function NotFound() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center text-center">
+      <h1 className="text-4xl font-bold text-gray-900">404</h1>
+      <p className="mt-2 text-gray-500">This page does not exist.</p>
+      <Link to="/" className="mt-6 text-sm font-medium text-primary hover:underline">← Back to Dashboard</Link>
+    </div>
   );
 }
 
@@ -66,6 +84,7 @@ export default function App() {
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/tenants/:id" element={<TenantDetail />} />
             <Route path="/users" element={<Users />} />
+            <Route path="/users/:id" element={<UserDetail />} />
             <Route path="/service-accounts" element={<ServiceAccounts />} />
             <Route path="/service-accounts/:id" element={<ServiceAccountDetail />} />
             <Route path="/api-keys" element={<ApiKeys />} />
@@ -73,6 +92,7 @@ export default function App() {
             <Route path="/clients" element={<Clients />} />
             <Route path="/service-tokens" element={<ServiceTokens />} />
             <Route path="/audit-logs" element={<AuditLogs />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </main>
       </div>

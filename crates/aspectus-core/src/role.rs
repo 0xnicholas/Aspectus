@@ -17,4 +17,7 @@ pub struct Role {
     pub r#type: RoleType,
     /// If `true`, this role is automatically assigned to new users.
     pub is_default: bool,
+    /// If `true`, this role is shipped with the system and cannot be
+    /// deleted or have its core fields modified.
+    pub is_system: bool,
 }

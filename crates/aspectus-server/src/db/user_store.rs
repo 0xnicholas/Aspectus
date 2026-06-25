@@ -64,4 +64,52 @@ impl UserStore for PgUserStore {
             .map_err(|e| CoreError::Internal(e.to_string()))?;
         Ok(result.rows_affected() > 0)
     }
+
+    async fn set_password(&self, id: &str, password_hash: &str) -> Result<bool, CoreError> {
+        let result =
+            sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2")
+                .bind(password_hash)
+                .bind(id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    async fn record_failed_login(
+        &self,
+        id: &str,
+        threshold: i32,
+        lockout_duration_secs: i64,
+    ) -> Result<(i32, Option<chrono::DateTime<chrono::Utc>>), CoreError> {
+        let row: (i32, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+            "UPDATE users \
+             SET failed_login_attempts = failed_login_attempts + 1, \
+                 locked_until = CASE \
+                     WHEN failed_login_attempts + 1 >= $2 \
+                     THEN NOW() + ($3 || ' seconds')::interval \
+                     ELSE locked_until \
+                 END \
+             WHERE id = $1 \
+             RETURNING failed_login_attempts, locked_until",
+        )
+        .bind(id)
+        .bind(threshold)
+        .bind(lockout_duration_secs)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(row)
+    }
+
+    async fn clear_failed_logins(&self, id: &str) -> Result<bool, CoreError> {
+        let result = sqlx::query(
+            "UPDATE users SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        Ok(result.rows_affected() > 0)
+    }
 }

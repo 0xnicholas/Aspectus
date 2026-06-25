@@ -36,8 +36,9 @@ pub struct JwtClaims {
 }
 
 /// Computed once from the private key at startup.
-fn build_jwks(pem: &str) -> serde_json::Value {
-    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem).expect("Invalid JWT private key PEM");
+fn build_jwks(pem: &str) -> Result<serde_json::Value, CoreError> {
+    let private_key = rsa::RsaPrivateKey::from_pkcs8_pem(pem)
+        .map_err(|e| CoreError::Internal(format!("Invalid JWT private key PEM: {e}")))?;
     let public_key = private_key.to_public_key();
     let n = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.n().to_bytes_be());
     let e = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(public_key.e().to_bytes_be());
@@ -47,7 +48,7 @@ fn build_jwks(pem: &str) -> serde_json::Value {
         let hash = sha2::Sha256::digest(public_key.n().to_bytes_be());
         hex::encode(&hash[..8])
     };
-    serde_json::json!({
+    Ok(serde_json::json!({
         "keys": [{
             "kty": "RSA",
             "use": "sig",
@@ -56,7 +57,7 @@ fn build_jwks(pem: &str) -> serde_json::Value {
             "n": n,
             "e": e
         }]
-    })
+    }))
 }
 
 pub struct JwtSigner {
@@ -94,7 +95,7 @@ impl JwtSigner {
                 tracing::info!("Using dev test JWT keys");
                 TEST_PRIVATE.to_string()
             });
-        let jwks = build_jwks(&pem);
+        let jwks = build_jwks(&pem)?;
         tracing::info!(kid = %jwks["keys"][0]["kid"], "JWKS ready");
         Ok(Self {
             encoding_key: EncodingKey::from_rsa_pem(pem.as_bytes())?,
@@ -147,8 +148,11 @@ impl JwtSigner {
         )
         .map_err(|e| CoreError::Internal(format!("JWT: {e}")))
     }
-    pub fn jwks_json(&self) -> serde_json::Value {
-        self.jwks.get().cloned().expect("JWKS not initialized")
+    pub fn jwks_json(&self) -> Result<serde_json::Value, CoreError> {
+        self.jwks
+            .get()
+            .cloned()
+            .ok_or_else(|| CoreError::Internal("JWKS not initialized".into()))
     }
 }
 
@@ -190,6 +194,15 @@ impl JwtVerifier {
         // (e.g. "pandaria") and the verifier doesn't necessarily know which
         // audience to expect (multi-project / federated scenarios).
         v.validate_aud = false;
+        // Enforce issuer to prevent tokens signed by a different identity layer.
+        v.set_issuer(&["https://aspectus"]);
+        // Configurable clock skew to tolerate small time differences between
+        // distributed nodes. Defaults to 60 seconds.
+        let skew: u64 = std::env::var("JWT_CLOCK_SKEW_SECONDS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+        v.leeway = skew;
         let claims = match decode::<JwtClaims>(token, &self.decoding_key, &v) {
             Ok(d) => d.claims,
             Err(_) => return IntrospectResponse::inactive(),
@@ -202,24 +215,21 @@ impl JwtVerifier {
         {
             return IntrospectResponse::inactive();
         }
-        IntrospectResponse {
-            active: true,
-            tenant_id: Some(claims.tenant_id),
-            user_id: Some(claims.sub),
-            identity_type: Some(
-                claims
-                    .identity_type
-                    .as_str()
-                    .try_into()
-                    .unwrap_or(IdentityType::User),
-            ),
-            client_id: Some(claims.client_id),
-            scope: Some(claims.scope),
-            token_type: Some("Bearer".into()),
-            exp: Some(claims.exp as i64),
-            quotas: None,
-            token_format: Some("jwt".into()),
-        }
+        let identity_type = claims
+            .identity_type
+            .as_str()
+            .try_into()
+            .unwrap_or(IdentityType::User);
+        IntrospectResponse::active(
+            claims.tenant_id,
+            claims.sub,
+            identity_type,
+            claims.client_id,
+            claims.scope,
+            claims.exp as i64,
+            None,
+            "jwt",
+        )
     }
     pub async fn revoke(&self, token: &str) -> bool {
         let mut v = Validation::new(jsonwebtoken::Algorithm::RS256);
@@ -246,7 +256,7 @@ mod tests {
 
     #[test]
     fn jwks_generation_produces_valid_jwk() {
-        let jwks = build_jwks(TEST_PRIVATE);
+        let jwks = build_jwks(TEST_PRIVATE).expect("build jwks");
         let keys = jwks["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 1);
 
@@ -261,9 +271,14 @@ mod tests {
 
     #[test]
     fn jwks_is_deterministic() {
-        let jwks1 = build_jwks(TEST_PRIVATE);
-        let jwks2 = build_jwks(TEST_PRIVATE);
+        let jwks1 = build_jwks(TEST_PRIVATE).expect("build jwks");
+        let jwks2 = build_jwks(TEST_PRIVATE).expect("build jwks");
         assert_eq!(jwks1.to_string(), jwks2.to_string());
+    }
+
+    #[test]
+    fn build_jwks_rejects_invalid_pem() {
+        assert!(build_jwks("not-a-pem").is_err());
     }
 
     #[test]
@@ -285,7 +300,7 @@ mod tests {
         let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
         validation.validate_exp = false;
         validation.validate_aud = false;
-        let jwks = build_jwks(TEST_PRIVATE);
+        let jwks = build_jwks(TEST_PRIVATE).expect("build jwks");
         let key = &jwks["keys"][0];
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
@@ -314,7 +329,7 @@ mod tests {
             )
             .expect("sign");
 
-        let jwks = signer.jwks_json();
+        let jwks = signer.jwks_json().expect("jwks");
         let key = &jwks["keys"][0];
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),
@@ -332,7 +347,7 @@ mod tests {
     // ---- ADR-016: tenant_name claim tests ----
 
     fn decode_token_for_test(signer: &JwtSigner, token: &str) -> JwtClaims {
-        let jwks = signer.jwks_json();
+        let jwks = signer.jwks_json().expect("jwks");
         let key = &jwks["keys"][0];
         let decoding_key = DecodingKey::from_rsa_components(
             key["n"].as_str().unwrap(),

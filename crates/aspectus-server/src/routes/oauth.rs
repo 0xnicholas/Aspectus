@@ -3,6 +3,7 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use aspectus_auth::password::PasswordHasher;
 use aspectus_core::identity::IdentityType;
@@ -96,14 +97,39 @@ pub async fn authorize(
         }
     };
 
+    // Check if user is suspended before issuing any code.
+    let is_suspended: bool = match sqlx::query_scalar(
+        "SELECT is_suspended FROM users WHERE id = $1",
+    )
+    .bind(&user_id)
+    .fetch_one(&state.pool)
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!(error = %e, user_id = %user_id, "Suspension check failed during authorize");
+            return ProblemDetails::internal_error(
+                "Authentication service temporarily unavailable",
+            )
+            .into_response();
+        }
+    };
+    if is_suspended {
+        return ProblemDetails::unauthorized("Account is suspended", "/authorize").into_response();
+    }
+
     // Generate authorization code
     let mut raw = [0u8; 32];
-    getrandom::getrandom(&mut raw).unwrap_or_default();
+    if let Err(e) = getrandom::getrandom(&mut raw) {
+        tracing::error!(error = %e, "Failed to generate authorization code");
+        return ProblemDetails::internal_error("Authentication service temporarily unavailable")
+            .into_response();
+    }
     let code = hex::encode(Sha256::digest(raw));
 
     let expires_at = Utc::now() + chrono::Duration::seconds(300);
 
-    let _ = state
+    if let Err(e) = state
         .auth_code_store
         .create_code(
             &code,
@@ -112,7 +138,12 @@ pub async fn authorize(
             &req.redirect_uri,
             expires_at,
         )
-        .await;
+        .await
+    {
+        tracing::error!(error = %e, "Failed to store authorization code");
+        return ProblemDetails::internal_error("Authentication service temporarily unavailable")
+            .into_response();
+    }
 
     // Store code_challenge if PKCE is in use
     if let Some(ref challenge) = req.code_challenge {
@@ -143,6 +174,8 @@ pub struct TokenRequest {
     client_id: Option<String>,
     #[serde(default)]
     client_secret: Option<String>,
+    #[serde(default)]
+    redirect_uri: Option<String>,
     #[serde(default)]
     refresh_token: Option<String>,
 }
@@ -202,30 +235,65 @@ pub async fn token(
                         .into_response();
                 }
             };
-            let (user_id, client_id, _redirect_uri) = row;
+            let (user_id, client_id, stored_redirect_uri) = row;
 
             if client_id != request_client_id {
                 return ProblemDetails::unauthorized("Invalid client_id", "/token").into_response();
             }
 
-            // PKCE: verify code_verifier if code_challenge was stored
-            if let Some(ref verifier) = req.code_verifier {
-                let challenge: Option<String> = sqlx::query_scalar(
-                    "SELECT code_challenge FROM authorization_codes WHERE code = $1",
-                )
-                .bind(&code)
-                .fetch_optional(&state.pool)
-                .await
-                .unwrap_or_default()
-                .flatten();
+            // OAuth 2.0: redirect_uri must match the one used in the authorize
+            // request exactly. This prevents authorization code interception attacks.
+            let request_redirect_uri = req.redirect_uri.as_deref().unwrap_or("");
+            if request_redirect_uri.is_empty() {
+                return ProblemDetails::validation_failed("redirect_uri required", vec![])
+                    .into_response();
+            }
+            if request_redirect_uri != stored_redirect_uri {
+                return ProblemDetails::unauthorized("redirect_uri mismatch", "/token")
+                    .into_response();
+            }
 
-                if let Some(expected_challenge) = challenge {
+            // PKCE: enforce code_verifier when a code_challenge was stored.
+            // If the authorization request included a challenge, the token request
+            // MUST include a matching verifier (OAuth 2.1 / RFC 7636).
+            let challenge: Option<String> = match sqlx::query_scalar(
+                "SELECT code_challenge FROM authorization_codes WHERE code = $1",
+            )
+            .bind(&code)
+            .fetch_optional(&state.pool)
+            .await
+            {
+                Ok(v) => v.flatten(),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to read stored PKCE challenge");
+                    return ProblemDetails::internal_error("Token service temporarily unavailable")
+                        .into_response();
+                }
+            };
+
+            match (challenge, req.code_verifier.as_ref()) {
+                (Some(expected_challenge), Some(verifier)) => {
                     let actual_challenge = hex::encode(Sha256::digest(verifier.as_bytes()));
-                    if actual_challenge != expected_challenge {
+                    if !constant_time_eq_hex(&expected_challenge, &actual_challenge) {
                         return ProblemDetails::unauthorized("Invalid code_verifier", "/token")
                             .into_response();
                     }
                 }
+                (Some(_), None) => {
+                    return ProblemDetails::unauthorized(
+                        "code_verifier required (PKCE challenge was sent)",
+                        "/token",
+                    )
+                    .into_response();
+                }
+                (None, Some(_)) => {
+                    return ProblemDetails::unauthorized(
+                        "code_verifier provided but no PKCE challenge was stored",
+                        "/token",
+                    )
+                    .into_response();
+                }
+                (None, None) => {}
             }
 
             let tenant_id =
@@ -297,19 +365,30 @@ pub async fn token(
                         return ProblemDetails::unauthorized("Invalid client_id", "/token")
                             .into_response();
                     }
-                    let tenant_id = match sqlx::query_as::<_, (String,)>(
-                        "SELECT tenant_id FROM users WHERE id = $1",
+                    let (tenant_id, is_suspended) = match sqlx::query_as::<_, (String, bool)>(
+                        "SELECT tenant_id, is_suspended FROM users WHERE id = $1",
                     )
                     .bind(&user_id)
                     .fetch_optional(&state.pool)
                     .await
                     {
-                        Ok(Some((tid,))) => tid,
-                        _ => {
+                        Ok(Some((tid, suspended))) => (tid, suspended),
+                        Ok(None) => {
                             return ProblemDetails::internal_error("User not found")
                                 .into_response();
                         }
+                        Err(e) => {
+                            tracing::error!(error = %e, user_id = %user_id, "User lookup failed during refresh");
+                            return ProblemDetails::internal_error(
+                                "Token service temporarily unavailable",
+                            )
+                            .into_response();
+                        }
                     };
+                    if is_suspended {
+                        return ProblemDetails::unauthorized("Account is suspended", "/token")
+                            .into_response();
+                    }
                     issue_tokens(&state, &user_id, &tenant_id, &client_id)
                         .await
                         .into_response()
@@ -344,6 +423,14 @@ pub async fn token(
         }
         _ => ProblemDetails::validation_failed("Unsupported grant_type", vec![]).into_response(),
     }
+}
+
+/// Constant-time comparison of two equal-length lowercase hex strings.
+fn constant_time_eq_hex(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
 pub async fn issue_tokens(
@@ -403,16 +490,22 @@ pub async fn issue_tokens(
             ttl_seconds: ttl,
         }) {
         Ok(t) => t,
-        Err(e) => return ProblemDetails::from(e).into_response(),
+        Err(e) => {
+            return ProblemDetails::from(e).into_response();
+        }
     };
 
     // Issue refresh token
     let mut raw = [0u8; 32];
-    getrandom::getrandom(&mut raw).unwrap_or_default();
+    if let Err(e) = getrandom::getrandom(&mut raw) {
+        tracing::error!(error = %e, "Failed to generate refresh token");
+        return ProblemDetails::internal_error("Token service temporarily unavailable")
+            .into_response();
+    }
     let refresh = format!("rt_{}", hex::encode(raw));
     let refresh_hash = hex::encode(Sha256::digest(refresh.as_bytes()));
 
-    let _ = state
+    if let Err(e) = state
         .refresh_token_store
         .create(
             &refresh_hash,
@@ -420,7 +513,12 @@ pub async fn issue_tokens(
             client_id,
             Utc::now() + chrono::Duration::days(30),
         )
-        .await;
+        .await
+    {
+        tracing::error!(error = %e, "Failed to store refresh token");
+        return ProblemDetails::internal_error("Token service temporarily unavailable")
+            .into_response();
+    }
 
     // ADR-016: Derive available_projects from the expanded scope string.
     // Reuses the helper so the parsing logic is unit-tested.

@@ -9,12 +9,14 @@ use serde::Deserialize;
 use serde_json::json;
 
 use aspectus_core::{
-    audit_log::AuditLog, identity::IdentityType, store::AuditLogStore, store::UserStore,
+    audit_log::AuditLog, identity::IdentityType, role::Role, store::AuditLogStore, store::UserStore,
 };
+
+use crate::scope_expander::ScopeExpander;
 
 use crate::AppState;
 use crate::error::ProblemDetails;
-use aspectus_auth::password::PasswordHasher;
+use aspectus_auth::password::{PasswordHasher, validate_password};
 
 use crate::util::generate_id;
 
@@ -46,6 +48,12 @@ pub struct SuspendRequest {
     suspended: bool,
 }
 
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
 pub async fn create(
     State(state): State<AppState>,
     Json(req): Json<CreateUserRequest>,
@@ -58,9 +66,8 @@ pub async fn create(
     {
         return ProblemDetails::validation_failed("Invalid display name", vec![]).into_response();
     }
-    if req.password.len() < 8 {
-        return ProblemDetails::validation_failed("Password must be at least 8 characters", vec![])
-            .into_response();
+    if let Err(msg) = validate_password(&req.password) {
+        return ProblemDetails::validation_failed(msg, vec![]).into_response();
     }
 
     let hash = match PasswordHasher::hash(&req.password) {
@@ -163,6 +170,144 @@ pub async fn suspend(
                     target_type: "user".into(),
                     target_id: id,
                     metadata: json!({"suspended": req.suspended}),
+                    created_at: Utc::now(),
+                })
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => ProblemDetails::not_found("User not found").into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+    }
+}
+
+pub async fn scopes(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+    let scope_string = ScopeExpander::expand(&state.pool, &id, Some(&state.scope_cache)).await;
+    let scopes: Vec<&str> = if scope_string.is_empty() {
+        vec![]
+    } else {
+        scope_string.split_whitespace().collect()
+    };
+    (StatusCode::OK, Json(json!({"scopes": scopes}))).into_response()
+}
+
+/// List roles currently assigned to a user.
+pub async fn list_roles(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match sqlx::query_as::<_, Role>(
+        "SELECT r.* FROM roles r JOIN users_roles ur ON ur.role_id = r.id WHERE ur.user_id = $1 ORDER BY r.name",
+    )
+    .bind(&id)
+    .fetch_all(&state.pool)
+    .await
+    {
+        Ok(roles) => (StatusCode::OK, Json(roles)).into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+    }
+}
+
+/// Self-service password change.
+///
+/// Requires the user's current password. This endpoint is intentionally public
+/// (rate-limited) so users can change their own password without an admin token.
+pub async fn change_password(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ChangePasswordRequest>,
+) -> impl IntoResponse {
+    if let Err(msg) = validate_password(&req.new_password) {
+        return ProblemDetails::validation_failed(msg, vec![]).into_response();
+    }
+
+    let user = match state.user_store.get_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return ProblemDetails::not_found(format!("User {id} not found")).into_response();
+        }
+        Err(e) => return ProblemDetails::internal_error(e.to_string()).into_response(),
+    };
+
+    if user.is_suspended {
+        return ProblemDetails::forbidden("Account is suspended").into_response();
+    }
+
+    let hash = match user.password_hash {
+        Some(h) => h,
+        None => {
+            return ProblemDetails::unauthorized(
+                "No password set",
+                format!("/users/{id}/change-password"),
+            )
+            .into_response();
+        }
+    };
+
+    match PasswordHasher::verify(&req.current_password, &hash) {
+        Ok(false) | Err(_) => {
+            return ProblemDetails::unauthorized(
+                "Current password is incorrect",
+                format!("/users/{id}/change-password"),
+            )
+            .into_response();
+        }
+        Ok(true) => {}
+    }
+
+    let new_hash = match PasswordHasher::hash(&req.new_password) {
+        Ok(h) => h,
+        Err(e) => return ProblemDetails::internal_error(e).into_response(),
+    };
+
+    match state.user_store.set_password(&id, &new_hash).await {
+        Ok(true) => {
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: user.tenant_id,
+                    actor_id: id.clone(),
+                    actor_type: IdentityType::User,
+                    action: "user.password_changed".into(),
+                    target_type: "user".into(),
+                    target_id: id,
+                    metadata: json!({}),
+                    created_at: Utc::now(),
+                })
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => ProblemDetails::not_found("User not found").into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+    }
+}
+
+/// POST /users/{id}/unlock
+///
+/// Clear failed-login attempts and any active account lockout.
+/// Requires an admin service token.
+pub async fn unlock(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
+    let user = match state.user_store.get_by_id(&id).await {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return ProblemDetails::not_found(format!("User {id} not found")).into_response();
+        }
+        Err(e) => return ProblemDetails::internal_error(e.to_string()).into_response(),
+    };
+
+    match state.user_store.clear_failed_logins(&id).await {
+        Ok(true) => {
+            let _ = state
+                .audit_log_store
+                .append(AuditLog {
+                    id: generate_id(),
+                    tenant_id: user.tenant_id,
+                    actor_id: "mgmt".into(),
+                    actor_type: IdentityType::ServiceAccount,
+                    action: "user.unlocked".into(),
+                    target_type: "user".into(),
+                    target_id: id,
+                    metadata: json!({"previous_failed_attempts": user.failed_login_attempts}),
                     created_at: Utc::now(),
                 })
                 .await;

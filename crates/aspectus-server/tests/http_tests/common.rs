@@ -163,10 +163,26 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
             "/users/{id}/suspend",
             put(aspectus_server::routes::users::suspend),
         )
+        .route(
+            "/users/{id}/unlock",
+            post(aspectus_server::routes::users::unlock),
+        )
+        .route(
+            "/users/{id}/scopes",
+            get(aspectus_server::routes::users::scopes),
+        )
         .route("/roles", get(aspectus_server::routes::roles::list))
+        .route("/roles", post(aspectus_server::routes::roles::create))
+        .route("/roles/{id}", get(aspectus_server::routes::roles::get))
+        .route("/roles/{id}", put(aspectus_server::routes::roles::update))
+        .route(
+            "/roles/{id}",
+            delete(aspectus_server::routes::roles::delete),
+        )
         .route(
             "/users/{id}/roles",
-            post(aspectus_server::routes::roles::assign),
+            get(aspectus_server::routes::users::list_roles)
+                .post(aspectus_server::routes::roles::assign),
         )
         .route(
             "/users/{id}/roles/{role_id}",
@@ -214,15 +230,29 @@ pub async fn build_app_with() -> anyhow::Result<TestApp> {
 
     let app = Router::new()
         .route(
+            "/token/revoke",
+            post(aspectus_server::routes::token::revoke),
+        )
+        .route(
             "/introspect",
             post(aspectus_server::routes::introspect::handle),
         )
-        .route_layer(auth_layer)
+        .route_layer(auth_layer.clone())
+        .route(
+            "/openapi.yaml",
+            get(aspectus_server::routes::docs::openapi_spec),
+        )
+        .route("/docs", get(aspectus_server::routes::docs::swagger_ui))
         .route("/health", get(aspectus_server::routes::health::handle))
         .route("/metrics", get(aspectus_server::routes::metrics::handle))
         .route(
             "/.well-known/jwks.json",
             get(aspectus_server::routes::token::jwks),
+        )
+        .route("/token", post(aspectus_server::routes::token::issue))
+        .route(
+            "/users/{id}/change-password",
+            post(aspectus_server::routes::users::change_password),
         )
         .route(
             "/authorize",

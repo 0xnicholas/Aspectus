@@ -41,10 +41,26 @@ impl TryFrom<&str> for IdentityType {
 ///
 /// Borrowed from Logto's `role_type` design, extended with `Both`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "role_type", rename_all = "lowercase")]
 pub enum RoleType {
     User,
     #[sqlx(rename = "service_account")]
     ServiceAccount,
     Both,
+}
+
+impl TryFrom<&str> for RoleType {
+    type Error = crate::error::CoreError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        match s {
+            "user" => Ok(RoleType::User),
+            "service_account" => Ok(RoleType::ServiceAccount),
+            "both" => Ok(RoleType::Both),
+            other => Err(crate::error::CoreError::Validation(format!(
+                "Unknown role_type: {other}"
+            ))),
+        }
+    }
 }

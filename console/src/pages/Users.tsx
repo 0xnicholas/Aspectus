@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Table, Modal, toast } from "../components/ui";
+import { Button, Input, LinkButton, Table, Modal, toast } from "../components/ui";
 import { api } from "../api/client";
 
 export function Users() {
@@ -8,6 +8,7 @@ export function Users() {
   const [password, setPassword] = useState("");
   const [users, setUsers] = useState<any[]>([]);
   const [suspendTarget, setSuspendTarget] = useState<any>(null);
+  const [unlockTarget, setUnlockTarget] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
   const listUsers = async () => {
@@ -33,16 +34,43 @@ export function Users() {
     setSuspendTarget(null); listUsers();
   };
 
+  const unlock = async () => {
+    if (!unlockTarget) return;
+    await api.unlockUser(unlockTarget.id);
+    toast("User unlocked");
+    setUnlockTarget(null); listUsers();
+  };
+
+  const isLocked = (u: any) => {
+    if (!u.locked_until) return false;
+    return new Date(u.locked_until) > new Date();
+  };
+
+  const statusBadge = (u: any) => {
+    if (u.is_suspended) {
+      return <span className="inline-flex items-center rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">Suspended</span>;
+    }
+    if (isLocked(u)) {
+      return <span className="inline-flex items-center rounded bg-yellow-100 px-2 py-0.5 text-xs font-medium text-yellow-800">Locked</span>;
+    }
+    return <span className="inline-flex items-center rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Active</span>;
+  };
+
   const columns = [
     { key: "id", header: "ID", render: (u: any) => <code className="text-xs text-gray-500">{u.id}</code> },
     { key: "email", header: "Email" },
-    { key: "status", header: "Status", render: (u: any) => u.is_suspended
-      ? <span className="inline-flex items-center rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">Suspended</span>
-      : <span className="inline-flex items-center rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">Active</span> },
-    { key: "actions", header: "", render: (u: any) =>
-      <Button size="sm" variant={u.is_suspended ? "primary" : "destructive"} onClick={() => setSuspendTarget(u)}>
-        {u.is_suspended ? "Unsuspend" : "Suspend"}
-      </Button> },
+    { key: "status", header: "Status", render: statusBadge },
+    { key: "actions", header: "", render: (u: any) => (
+      <div className="flex gap-2">
+        <LinkButton size="sm" variant="outline" to={`/users/${u.id}`}>View</LinkButton>
+        {isLocked(u) && (
+          <Button size="sm" variant="outline" onClick={() => setUnlockTarget(u)}>Unlock</Button>
+        )}
+        <Button size="sm" variant={u.is_suspended ? "primary" : "destructive"} onClick={() => setSuspendTarget(u)}>
+          {u.is_suspended ? "Unsuspend" : "Suspend"}
+        </Button>
+      </div>
+    )},
   ];
 
   return (
@@ -63,6 +91,10 @@ export function Users() {
         confirmLabel={suspendTarget?.is_suspended ? "Unsuspend" : "Suspend"}
         variant={suspendTarget?.is_suspended ? "primary" : "destructive"}
         onConfirm={toggleSuspend} onCancel={() => setSuspendTarget(null)} />
+      <Modal open={!!unlockTarget} title="Unlock User"
+        message={`Unlock ${unlockTarget?.email}? This clears failed login attempts and any active lockout.`}
+        confirmLabel="Unlock" variant="primary"
+        onConfirm={unlock} onCancel={() => setUnlockTarget(null)} />
     </div>
   );
 }

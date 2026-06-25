@@ -237,6 +237,11 @@ components:
           nullable: true
         is_suspended:
           type: boolean
+        locked_until:
+          type: string
+          format: date-time
+          nullable: true
+          description: 账户锁定到期时间；存在且未过期时表示账户因多次登录失败被锁定
         last_sign_in_at:
           type: string
           format: date-time
@@ -319,6 +324,49 @@ components:
           enum: [user, service_account, both]
         is_default:
           type: boolean
+        is_system:
+          type: boolean
+          description: 系统预置角色，不可删除或修改核心字段
+        scopes:
+          type: array
+          items:
+            type: string
+          description: 该角色包含的 scope 列表（由 /roles 和 /roles/{id} 返回）
+
+    CreateRoleRequest:
+      type: object
+      required: [name, type, scopes]
+      properties:
+        name:
+          type: string
+          description: 角色标识名，全局唯一，仅允许字母、数字、下划线、中划线
+        description:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [user, service_account, both]
+        scopes:
+          type: array
+          items:
+            type: string
+          description: scope 列表，格式 project:resource:action
+
+    UpdateRoleRequest:
+      type: object
+      required: [type, scopes]
+      properties:
+        description:
+          type: string
+          nullable: true
+        type:
+          type: string
+          enum: [user, service_account, both]
+        scopes:
+          type: array
+          items:
+            type: string
+          description: scope 列表，格式 project:resource:action
 
     IntrospectResponse:
       type: object
@@ -377,6 +425,73 @@ components:
           type: string
         refresh_token:
           type: string
+
+    ServiceToken:
+      type: object
+      properties:
+        project:
+          type: string
+        token:
+          type: string
+          description: Service Token 原文（仅创建/轮换时返回一次）
+        token_prefix:
+          type: string
+        token_hash:
+          type: string
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TokenIssueRequest:
+      type: object
+      required: [grant_type]
+      properties:
+        grant_type:
+          type: string
+          enum: [client_credentials]
+        client_id:
+          type: string
+          description: OAuth2 client_id（必须与 project 匹配）
+        client_secret:
+          type: string
+        project:
+          type: string
+          enum: [pandaria, emerald, constell, tokencamp, heirloom]
+        scope:
+          type: string
+          description: 空格分隔的 scope 列表
+        token_format:
+          type: string
+          enum: [jwt, opaque]
+          default: jwt
+
+    TokenRevokeRequest:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+          description: 要吊销的 token（API Key 或 Opaque token）
+
+    UserScopes:
+      type: object
+      properties:
+        scopes:
+          type: array
+          items:
+            type: string
+
+    UserRoleList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Role"
 
 paths:
   # ── System ──
@@ -452,6 +567,49 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProblemDetails"
 
+  /token:
+    post:
+      tags: [Introspection]
+      summary: 签发 access token
+      description: |
+        使用 client_credentials 为 service account 或 machine client 签发
+        JWT 或 Opaque token。
+      security:
+        - ServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenIssueRequest"
+      responses:
+        "200":
+          description: Token 签发成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: client_secret 无效或 client_id/project 不匹配
+
+  /token/revoke:
+    post:
+      tags: [Introspection]
+      summary: 吊销 token
+      description: |
+        吊销 API Key 或 Opaque token。吊销后 `/introspect` 返回 `active: false`。
+      security:
+        - ServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TokenRevokeRequest"
+      responses:
+        "204":
+          description: 吊销成功（幂等）
+
   # ── Tenants ──
   /tenants:
     post:
@@ -478,6 +636,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Tenant"
+    get:
+      tags: [Tenants]
+      summary: 列出所有租户
+      security:
+        - ServiceToken: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tenant"
 
   /tenants/{id}:
     get:
@@ -519,9 +691,25 @@ paths:
           application/json:
             schema:
               type: object
+              description: |
+                以 project 为键的配额对象。每个 project 的值为 object，
+                其中已知数值型字段必须是非负整数：monthly_tokens,
+                max_concurrent_sessions, max_users, max_api_keys,
+                requests_per_minute, monthly_requests。
+              example:
+                pandaria:
+                  max_concurrent_sessions: 50
+                tokencamp:
+                  monthly_tokens: 10000000
       responses:
         "204":
           description: 更新成功
+        "422":
+          description: 配额 schema 不合法（未知 project 或数值型字段非整数）
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/ProblemDetails"
 
   # ── Service Accounts ──
   /service-accounts:
@@ -695,7 +883,103 @@ paths:
         "204":
           description: 操作成功
 
+  /users/{id}/unlock:
+    post:
+      tags: [Users]
+      summary: 解锁用户账户
+      description: |
+        清除登录失败计数并解除账户锁定。需要 admin service token。
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 解锁成功
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/change-password:
+    post:
+      tags: [Users]
+      summary: 自助修改密码
+      description: |
+        用户修改自己的登录密码，必须提供当前密码。该端点公开可访问，
+        受 IP 级 rate limit 保护。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 8
+      responses:
+        "204":
+          description: 修改成功
+        "401":
+          description: 当前密码错误或用户不存在/被挂起
+        "422":
+          description: 新密码过短
+
+  /users/{id}/scopes:
+    get:
+      tags: [Users]
+      summary: 查询用户有效 scopes
+      description: 返回用户所有角色展开后合并去重的 scope 列表
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserScopes"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /users/{id}/roles:
+    get:
+      tags: [Roles]
+      summary: 列出用户已分配角色
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: User ID
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserRoleList"
     post:
       tags: [Roles]
       summary: 为用户分配角色
@@ -721,6 +1005,8 @@ paths:
       responses:
         "201":
           description: 分配成功
+        "204":
+          description: 重复分配（幂等）
         "422":
           description: role_type 不匹配（如给 User 分配 service_account 专属 Role）
 
@@ -762,6 +1048,202 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Role"
+    post:
+      tags: [Roles]
+      summary: 创建自定义角色
+      security:
+        - ServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRoleRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: 角色名已存在
+
+  /roles/{id}:
+    get:
+      tags: [Roles]
+      summary: 查询角色详情（含 scopes）
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Roles]
+      summary: 更新自定义角色
+      description: 仅可更新自定义角色。系统角色（is_system=true）不可修改。
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRoleRequest"
+      responses:
+        "200":
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Role"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: 系统角色禁止修改
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [Roles]
+      summary: 删除自定义角色
+      description: 仅可删除自定义角色，且该角色不能被任何用户持有。
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 删除成功
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: 系统角色禁止删除
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Service Tokens ──
+  /service-tokens:
+    get:
+      tags: [System]
+      summary: 列出所有 Service Token 元数据
+      security:
+        - ServiceToken: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ServiceToken"
+    post:
+      tags: [System]
+      summary: 创建 Service Token
+      description: 为指定生态项目创建 Service Token，用于调用 /introspect
+      security:
+        - ServiceToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project]
+              properties:
+                project:
+                  type: string
+                  enum: [pandaria, emerald, constell, tokencamp, heirloom]
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceToken"
+        "409":
+          description: 该项目已存在活跃 Service Token
+
+  /service-tokens/{project}:
+    get:
+      tags: [System]
+      summary: 查询 Service Token 元数据
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceToken"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [System]
+      summary: 吊销 Service Token
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: 吊销成功
+
+  /service-tokens/{project}/rotate:
+    post:
+      tags: [System]
+      summary: 轮换 Service Token
+      description: 生成新 token，旧 token 立即失效
+      security:
+        - ServiceToken: []
+      parameters:
+        - name: project
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 轮换成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ServiceToken"
 
   # ── API Keys ──
   /api-keys:
@@ -796,11 +1278,6 @@ paths:
                     - pandaria
                     - emerald
                     - constell
-                    - tokencamp
-                    - heirloom
-                    # 'tavern' intentionally removed 2026-06-21.
-                    # Historical DB rows still contain this value; see
-                    # docs/PROJECT_STATUS.md and migration #15.
                     - tokencamp
                     - heirloom
                 scopes:

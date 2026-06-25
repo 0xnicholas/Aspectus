@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::identity::IdentityType;
+use crate::{error::CoreError, identity::IdentityType};
 
 /// RFC 7662 Token Introspection response (ADR-001).
 ///
@@ -58,5 +58,59 @@ impl IntrospectResponse {
             quotas: None,
             token_format: None,
         }
+    }
+
+    /// Constructor for an active introspection response.
+    ///
+    /// Requires the fields that RFC 7662 consumers rely on: `tenant_id`,
+    /// `scope`, and `exp`. Use [`IntrospectResponse::inactive`] for invalid tokens.
+    #[allow(clippy::too_many_arguments)]
+    pub fn active(
+        tenant_id: impl Into<String>,
+        user_id: impl Into<String>,
+        identity_type: IdentityType,
+        client_id: impl Into<String>,
+        scope: impl Into<String>,
+        exp: i64,
+        quotas: Option<std::collections::HashMap<String, serde_json::Value>>,
+        token_format: impl Into<String>,
+    ) -> Self {
+        Self {
+            active: true,
+            tenant_id: Some(tenant_id.into()),
+            user_id: Some(user_id.into()),
+            identity_type: Some(identity_type),
+            client_id: Some(client_id.into()),
+            scope: Some(scope.into()),
+            token_type: Some("Bearer".into()),
+            exp: Some(exp),
+            quotas,
+            token_format: Some(token_format.into()),
+        }
+    }
+
+    /// Validate that an active response carries the mandatory fields.
+    ///
+    /// Returns `Ok(())` for inactive responses regardless of other fields.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        if !self.active {
+            return Ok(());
+        }
+        if self.tenant_id.is_none() {
+            return Err(CoreError::Validation(
+                "active introspection response missing tenant_id".into(),
+            ));
+        }
+        if self.scope.is_none() {
+            return Err(CoreError::Validation(
+                "active introspection response missing scope".into(),
+            ));
+        }
+        if self.exp.is_none() {
+            return Err(CoreError::Validation(
+                "active introspection response missing exp".into(),
+            ));
+        }
+        Ok(())
     }
 }

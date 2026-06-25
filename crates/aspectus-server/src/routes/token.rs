@@ -8,6 +8,7 @@ use aspectus_core::project::Project;
 
 use crate::AppState;
 use crate::error::ProblemDetails;
+use crate::routes::metrics;
 use aspectus_core::store::ApiKeyStore;
 
 #[derive(Deserialize)]
@@ -39,11 +40,33 @@ pub async fn issue(
 
     let tenant_id = introspect.tenant_id.unwrap_or_default();
     let scopes = introspect.scope.unwrap_or_default();
+    let service_account_id = introspect.user_id.unwrap_or_default();
     let project: Project = introspect
         .client_id
         .as_deref()
         .and_then(|s| s.parse().ok())
         .unwrap_or(Project::Pandaria);
+
+    // The requested client_id must match the API key's project. This prevents a
+    // caller from using a Pandaria API key to request a token with a Constell
+    // client_id (even though the scopes would still be Pandaria's).
+    let requested_project: Project = match req.client_id.parse() {
+        Ok(p) => p,
+        Err(_) => {
+            return ProblemDetails::validation_failed(
+                format!("Unknown project: {}", req.client_id),
+                vec![],
+            )
+            .into_response();
+        }
+    };
+    if requested_project != project {
+        return ProblemDetails::unauthorized(
+            "client_id does not match the API key's project",
+            "/token",
+        )
+        .into_response();
+    }
 
     match req.token_format.as_str() {
         "jwt" => {
@@ -52,21 +75,24 @@ pub async fn issue(
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(900);
             match state.jwt_signer.sign(
-                &req.client_id,
+                &service_account_id,
                 &tenant_id,
                 project,
                 &scopes,
                 IdentityType::ServiceAccount,
                 ttl,
             ) {
-                Ok(token) => (
-                    StatusCode::OK,
-                    Json(json!({
-                        "access_token": token, "token_format": "jwt",
-                        "expires_in": ttl, "token_type": "Bearer"
-                    })),
-                )
-                    .into_response(),
+                Ok(token) => {
+                    metrics::record_token_issued("jwt");
+                    (
+                        StatusCode::OK,
+                        Json(json!({
+                            "access_token": token, "token_format": "jwt",
+                            "expires_in": ttl, "token_type": "Bearer"
+                        })),
+                    )
+                        .into_response()
+                }
                 Err(e) => ProblemDetails::from(e).into_response(),
             }
         }
@@ -77,17 +103,20 @@ pub async fn issue(
                 .unwrap_or(3600);
             match state
                 .api_key_creator
-                .create_opaque(&tenant_id, &req.client_id, project, &scopes, ttl)
+                .create_opaque(&tenant_id, &service_account_id, project, &scopes, ttl)
                 .await
             {
-                Ok(token) => (
-                    StatusCode::OK,
-                    Json(json!({
-                        "access_token": token.key, "token_format": "opaque",
-                        "expires_in": ttl, "token_type": "Bearer"
-                    })),
-                )
-                    .into_response(),
+                Ok(token) => {
+                    metrics::record_token_issued("opaque");
+                    (
+                        StatusCode::OK,
+                        Json(json!({
+                            "access_token": token.key, "token_format": "opaque",
+                            "expires_in": ttl, "token_type": "Bearer"
+                        })),
+                    )
+                        .into_response()
+                }
                 Err(e) => ProblemDetails::from(e).into_response(),
             }
         }
@@ -107,8 +136,12 @@ pub async fn revoke(
         return ProblemDetails::validation_failed("token is required", vec![]).into_response();
     }
 
+    metrics::record_token_revoked(false); // total counter
+    let mut revoked = false;
+
     if token.starts_with("eyJ") {
         state.jwt_verifier.revoke(token).await;
+        revoked = true;
     } else {
         // API Key or Opaque: extract raw bytes, hash, find, revoke
         let raw = token
@@ -117,15 +150,24 @@ pub async fn revoke(
             .and_then(|s| hex::decode(s).ok());
         if let Some(raw_bytes) = raw {
             let hash = hex::encode(Sha256::digest(&raw_bytes));
-            if let Ok(Some(key)) = state.api_key_store.find_by_hash(&hash).await {
-                let _ = state.api_key_store.revoke(&key.id).await;
+            if let Ok(Some(key)) = state.api_key_store.find_by_hash(&hash).await
+                && state.api_key_store.revoke(&key.id).await.is_ok()
+            {
+                revoked = true;
             }
         }
+    }
+
+    if revoked {
+        metrics::record_token_revoked(true);
     }
 
     StatusCode::NO_CONTENT.into_response()
 }
 
-pub async fn jwks(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(state.jwt_signer.jwks_json())
+pub async fn jwks(State(state): State<AppState>) -> impl IntoResponse {
+    match state.jwt_signer.jwks_json() {
+        Ok(jwks) => (StatusCode::OK, Json(jwks)).into_response(),
+        Err(e) => ProblemDetails::internal_error(e.to_string()).into_response(),
+    }
 }

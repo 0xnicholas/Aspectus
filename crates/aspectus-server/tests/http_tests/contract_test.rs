@@ -914,7 +914,7 @@ async fn cross_tenant_login_isolation_contract() {
         "isolation-{}@test.com",
         chrono::Utc::now().timestamp_millis()
     );
-    let password = "isolation-pass-123";
+    let password = "Isolation-pass-123";
 
     let user_a = create_user(&app.router, &tenant_a, &email, password).await;
     let user_b = create_user(&app.router, &tenant_b, &email, password).await;

@@ -12,6 +12,7 @@ use aspectus_core::{
     audit_log::AuditLog,
     identity::IdentityType,
     project::Project,
+    scope::Scope,
     store::{ApiKeyStore, AuditLogStore, ServiceAccountStore, UserStore},
 };
 
@@ -19,7 +20,7 @@ use crate::AppState;
 use crate::error::ProblemDetails;
 use crate::util::generate_id;
 
-const MAX_SCOPES_PER_KEY: usize = 64;
+const MAX_SCOPES_PER_KEY: usize = Scope::MAX_SCOPES_PER_KEY;
 
 #[derive(Deserialize)]
 pub struct CreateApiKeyRequest {
@@ -80,15 +81,53 @@ pub async fn create(
         .into_response();
     }
 
+    // Validate each scope is syntactically valid and belongs to the key's project.
+    for scope in &req.scopes {
+        if let Err(e) = Scope::validate(scope) {
+            return ProblemDetails::validation_failed(
+                format!("Invalid scope '{scope}': {e}"),
+                vec![],
+            )
+            .into_response();
+        }
+        match Scope::project(scope) {
+            Ok(scope_project) if scope_project == project => {}
+            Ok(scope_project) => {
+                return ProblemDetails::validation_failed(
+                    format!(
+                        "Scope '{scope}' belongs to project '{scope_project}' but key project is '{}'",
+                        project
+                    ),
+                    vec![],
+                )
+                .into_response();
+            }
+            Err(e) => {
+                return ProblemDetails::validation_failed(
+                    format!("Invalid scope '{scope}': {e}"),
+                    vec![],
+                )
+                .into_response();
+            }
+        }
+    }
+
     // v0.3.0: Validate scopes exist in the database
     if !req.scopes.is_empty() {
-        let valid =
-            sqlx::query_scalar::<_, bool>("SELECT COUNT(*) = $1 FROM scopes WHERE name = ANY($2)")
-                .bind(req.scopes.len() as i64)
-                .bind(&req.scopes)
-                .fetch_one(&state.pool)
-                .await
-                .unwrap_or(false);
+        let valid = match sqlx::query_scalar::<_, bool>(
+            "SELECT COUNT(*) = $1 FROM scopes WHERE name = ANY($2)",
+        )
+        .bind(req.scopes.len() as i64)
+        .bind(&req.scopes)
+        .fetch_one(&state.pool)
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(error = %e, "Scope existence check failed");
+                return ProblemDetails::internal_error("Failed to validate scopes").into_response();
+            }
+        };
 
         if !valid {
             return ProblemDetails::validation_failed(

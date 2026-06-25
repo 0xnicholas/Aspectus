@@ -18,16 +18,35 @@ impl PgServiceTokenStore {
 
 #[async_trait]
 impl ServiceTokenStore for PgServiceTokenStore {
-    async fn find_by_hash(&self, token_hash: &str) -> Result<Option<Project>, CoreError> {
-        let result: Option<(String,)> = sqlx::query_as(
-            "SELECT project FROM service_tokens WHERE token_hash = $1 AND revoked_at IS NULL",
+    async fn find_by_hash(&self, token_hash: &str) -> Result<Option<ServiceToken>, CoreError> {
+        let row: Option<(
+            String,
+            String,
+            Option<String>,
+            DateTime<Utc>,
+            DateTime<Utc>,
+            Option<DateTime<Utc>>,
+        )> = sqlx::query_as(
+            "SELECT project, token_hash, token_prefix, created_at, updated_at, revoked_at \
+             FROM service_tokens WHERE token_hash = $1 AND revoked_at IS NULL",
         )
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| CoreError::Internal(e.to_string()))?;
 
-        Ok(result.and_then(|(s,)| s.parse().ok()))
+        Ok(row.and_then(
+            |(project, token_hash, token_prefix, created_at, updated_at, revoked_at)| {
+                project.parse().ok().map(|project| ServiceToken {
+                    project,
+                    token_hash,
+                    token_prefix,
+                    created_at,
+                    updated_at,
+                    revoked_at,
+                })
+            },
+        ))
     }
 
     async fn list(&self) -> Result<Vec<ServiceToken>, CoreError> {

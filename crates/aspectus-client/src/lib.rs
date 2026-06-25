@@ -25,14 +25,14 @@
 //! assert!(response.active);
 //! ```
 
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aspectus_core::identity::IdentityType;
 use aspectus_core::introspect::IntrospectResponse;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 /// JWT claims as signed by Aspectus.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,27 +228,30 @@ impl AspectusClient {
 struct JwtVerifier {
     jwks_url: String,
     client: reqwest::Client,
-    decoding_key: OnceLock<DecodingKey>,
-    last_refresh: Mutex<Option<Instant>>,
+    decoding_key: Arc<RwLock<Option<DecodingKey>>>,
+    last_refresh: Arc<RwLock<Option<Instant>>>,
 }
 
 impl Clone for JwtVerifier {
     fn clone(&self) -> Self {
-        // Each clone starts with empty cache — will re-fetch JWKS on first use
         Self {
             jwks_url: self.jwks_url.clone(),
             client: self.client.clone(),
-            decoding_key: OnceLock::new(),
-            last_refresh: Mutex::new(None),
+            decoding_key: self.decoding_key.clone(),
+            last_refresh: self.last_refresh.clone(),
         }
     }
 }
 
 impl std::fmt::Debug for JwtVerifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let has_key = {
+            let guard = self.decoding_key.try_read();
+            guard.map(|g| g.is_some()).unwrap_or(false)
+        };
         f.debug_struct("JwtVerifier")
             .field("jwks_url", &self.jwks_url)
-            .field("has_key", &self.decoding_key.get().is_some())
+            .field("has_key", &has_key)
             .finish()
     }
 }
@@ -278,8 +281,8 @@ impl JwtVerifier {
         Self {
             jwks_url: format!("{base_url}/.well-known/jwks.json"),
             client: reqwest::Client::new(),
-            decoding_key: OnceLock::new(),
-            last_refresh: Mutex::new(None),
+            decoding_key: Arc::new(RwLock::new(None)),
+            last_refresh: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -313,14 +316,10 @@ impl JwtVerifier {
         let decoding_key = DecodingKey::from_rsa_components(&key.n, &key.e)
             .map_err(|e| ClientError::JwtVerify(format!("Invalid JWK: {e}")))?;
 
-        // Cache the key
-        // Note: OnceLock can only be set once. For key rotation support,
-        // we'd need a RwLock or similar. For now, key rotation requires
-        // recreating the client.
-        let _ = self.decoding_key.set(decoding_key);
-
-        let mut last = self.last_refresh.lock().await;
-        *last = Some(Instant::now());
+        let mut key_guard = self.decoding_key.write().await;
+        *key_guard = Some(decoding_key);
+        let mut last_guard = self.last_refresh.write().await;
+        *last_guard = Some(Instant::now());
 
         Ok(())
     }
@@ -328,15 +327,18 @@ impl JwtVerifier {
     /// Ensure JWKS is fetched and still valid.
     async fn ensure_jwks(&self) -> Result<(), ClientError> {
         let needs_refresh = {
-            let last = self.last_refresh.lock().await;
+            let last = self.last_refresh.read().await;
             match *last {
                 Some(ts) => ts.elapsed() > Duration::from_secs(3600), // 1h TTL
                 None => true,
             }
         };
 
-        if needs_refresh || self.decoding_key.get().is_none() {
-            self.fetch_jwks().await?;
+        if needs_refresh {
+            let key_exists = self.decoding_key.read().await.is_some();
+            if !key_exists || needs_refresh {
+                self.fetch_jwks().await?;
+            }
         }
 
         Ok(())
@@ -346,17 +348,20 @@ impl JwtVerifier {
     async fn verify(&self, token: &str) -> Result<IntrospectResponse, ClientError> {
         self.ensure_jwks().await?;
 
-        let key = self
-            .decoding_key
-            .get()
-            .ok_or_else(|| ClientError::JwtVerify("No JWKS key available".into()))?;
+        let key = {
+            let guard = self.decoding_key.read().await;
+            guard
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| ClientError::JwtVerify("No JWKS key available".into()))?
+        };
 
         let mut validation = Validation::new(jsonwebtoken::Algorithm::RS256);
         validation.validate_exp = true;
         // Relax audience validation — the JWT audience is the project name
         validation.validate_aud = false;
 
-        let data = decode::<JwtClaims>(token, key, &validation)
+        let data = decode::<JwtClaims>(token, &key, &validation)
             .map_err(|e| ClientError::JwtVerify(format!("{e}")))?;
 
         let claims = data.claims;
@@ -367,18 +372,16 @@ impl JwtVerifier {
             .try_into()
             .unwrap_or(IdentityType::User);
 
-        Ok(IntrospectResponse {
-            active: true,
-            tenant_id: Some(claims.tenant_id),
-            user_id: Some(claims.sub),
-            identity_type: Some(identity_type),
-            client_id: Some(claims.client_id),
-            scope: Some(claims.scope),
-            token_type: Some("Bearer".into()),
-            exp: Some(claims.exp as i64),
-            quotas: None,
-            token_format: Some("jwt".into()),
-        })
+        Ok(IntrospectResponse::active(
+            claims.tenant_id,
+            claims.sub,
+            identity_type,
+            claims.client_id,
+            claims.scope,
+            claims.exp as i64,
+            None,
+            "jwt",
+        ))
     }
 }
 
@@ -414,5 +417,32 @@ mod tests {
         let claims: JwtClaims = serde_json::from_str(json).unwrap();
         assert_eq!(claims.sub, "user1");
         assert_eq!(claims.identity_type, "user");
+    }
+
+    #[tokio::test]
+    async fn verify_jwt_disabled_returns_error() {
+        let client = AspectusClient::without_jwt("http://localhost:3100", "test");
+        let err = client
+            .verify_jwt("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ClientError::JwtVerify(_)));
+    }
+
+    #[tokio::test]
+    async fn refresh_jwks_for_disabled_client_is_noop() {
+        let client = AspectusClient::without_jwt("http://localhost:3100", "test");
+        let result = client.refresh_jwks().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn fetch_jwks_errors_for_unavailable_server() {
+        let client = AspectusClient::new("http://localhost:1", "test");
+        let err = client.refresh_jwks().await.unwrap_err();
+        assert!(
+            matches!(err, ClientError::JwksFetch(_)),
+            "expected JwksFetch error, got {err}"
+        );
     }
 }

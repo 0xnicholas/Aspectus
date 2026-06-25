@@ -21,3 +21,4 @@ jsonwebtoken = "9"
 anyhow = "1"
 rsa = { version = "0.9", features = ["pem"] }
 base64 = "0.22"
+subtle = "2"

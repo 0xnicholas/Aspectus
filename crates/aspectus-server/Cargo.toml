@@ -28,6 +28,8 @@ getrandom = "0.2"
 hex = "0.4"
 
 sha2.workspace = true
+subtle = "2"
+ipnetwork = "0.20"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "pool", "tokio1-rustls-tls", "builder"] }
 
 [dev-dependencies]
