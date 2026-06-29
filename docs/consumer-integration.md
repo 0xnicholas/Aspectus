@@ -469,11 +469,22 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
 `aspectus-client` v0.9.0+ 提供 `verify_jwt()`，**本地 RS256 验签**，完全不走网络。
 
+### 7.1 构造客户端
+
 ```rust
 use aspectus_client::AspectusClient;
 
-let client = AspectusClient::new("http://localhost:3100", service_token);
+// 方式 1：从环境变量读取（推荐用于生产部署）
+//   读取 ASPECTUS_URL 与 ASPECTUS_SERVICE_TOKEN；任何一项缺失返回 ClientError::Parse
+let client = AspectusClient::from_env()?;
 
+// 方式 2：显式传入（推荐用于测试或需要动态配置的场合）
+let client = AspectusClient::new("http://localhost:3100", service_token);
+```
+
+### 7.2 选择验证路径
+
+```rust
 // JWT：本地验签（首次调用 fetch JWKS，后续 1h 缓存）
 let resp = client.verify_jwt("eyJhbGciOi...").await?;
 

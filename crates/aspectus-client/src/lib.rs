@@ -133,6 +133,28 @@ impl AspectusClient {
         }
     }
 
+    /// Construct a client from standard environment variables.
+    ///
+    /// Reads:
+    /// - `ASPECTUS_URL`              — Aspectus base URL (e.g. `http://aspectus.svc:3100`)
+    /// - `ASPECTUS_SERVICE_TOKEN`    — service token for this consumer project
+    ///
+    /// Defaults JWT verifier to **enabled** (matches `new`). Use
+    /// [`AspectusClient::without_jwt`] explicitly if you need to disable it.
+    ///
+    /// Returns [`ClientError::Parse`] with the missing variable name if either
+    /// env var is unset. Empty strings are treated as set — they will surface
+    /// as connection errors at request time, not at construction time.
+    pub fn from_env() -> Result<Self, ClientError> {
+        let base_url = std::env::var("ASPECTUS_URL").map_err(|_| {
+            ClientError::Parse("ASPECTUS_URL environment variable is not set".into())
+        })?;
+        let service_token = std::env::var("ASPECTUS_SERVICE_TOKEN").map_err(|_| {
+            ClientError::Parse("ASPECTUS_SERVICE_TOKEN environment variable is not set".into())
+        })?;
+        Ok(Self::new(base_url, service_token))
+    }
+
     // ---- /introspect ----
 
     /// Call `POST /introspect` to validate a token.
@@ -444,5 +466,95 @@ mod tests {
             matches!(err, ClientError::JwksFetch(_)),
             "expected JwksFetch error, got {err}"
         );
+    }
+
+    // ---- from_env() ----
+    //
+    // 这些测试修改进程环境变量。edition 2024 下 `std::env::set_var` / `remove_var`
+    // 标记为 unsafe（非线程安全），需配合 EnvGuard 在 Drop 中恢复，保证 panic-safe。
+    // 三个测试共享同一进程内的全局 env table，必须串行执行——用 ENV_LOCK 互斥。
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        name: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(name: &'static str, value: &str) -> Self {
+            let original = std::env::var(name).ok();
+            // SAFETY: 测试持 ENV_LOCK 串行执行；其他测试不修改这两个名字
+            unsafe { std::env::set_var(name, value) };
+            Self { name, original }
+        }
+
+        fn remove(name: &'static str) -> Self {
+            let original = std::env::var(name).ok();
+            // SAFETY: 同上
+            unsafe { std::env::remove_var(name) };
+            Self { name, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                // SAFETY: 恢复原值/移除，按原样还原
+                Some(v) => unsafe { std::env::set_var(self.name, v) },
+                None => unsafe { std::env::remove_var(self.name) },
+            }
+        }
+    }
+
+    #[test]
+    fn from_env_returns_client_when_both_vars_set() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _u = EnvGuard::set("ASPECTUS_URL", "http://aspectus.test:3100");
+        let _t = EnvGuard::set("ASPECTUS_SERVICE_TOKEN", "test-token-abc");
+
+        let client = AspectusClient::from_env().expect("from_env should succeed");
+
+        assert_eq!(client.base_url, "http://aspectus.test:3100");
+        assert_eq!(client.service_token, "test-token-abc");
+        assert!(client.jwt_verifier.is_some(), "默认应启用 JWT 验签");
+    }
+
+    #[test]
+    fn from_env_errors_when_url_missing() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _u = EnvGuard::remove("ASPECTUS_URL");
+        let _t = EnvGuard::set("ASPECTUS_SERVICE_TOKEN", "test-token");
+
+        let err = AspectusClient::from_env().unwrap_err();
+
+        match err {
+            ClientError::Parse(msg) => {
+                assert!(
+                    msg.contains("ASPECTUS_URL"),
+                    "错误信息应明确指出缺失哪个变量，实际: {msg}"
+                );
+            }
+            other => panic!("expected ClientError::Parse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_env_errors_when_token_missing() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _u = EnvGuard::set("ASPECTUS_URL", "http://aspectus.test:3100");
+        let _t = EnvGuard::remove("ASPECTUS_SERVICE_TOKEN");
+
+        let err = AspectusClient::from_env().unwrap_err();
+
+        match err {
+            ClientError::Parse(msg) => {
+                assert!(
+                    msg.contains("ASPECTUS_SERVICE_TOKEN"),
+                    "错误信息应明确指出缺失哪个变量，实际: {msg}"
+                );
+            }
+            other => panic!("expected ClientError::Parse, got {other:?}"),
+        }
     }
 }
