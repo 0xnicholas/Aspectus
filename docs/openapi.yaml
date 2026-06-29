@@ -1251,9 +1251,11 @@ paths:
       tags: [API Keys]
       summary: 创建 API Key
       description: |
-        创建 API Key。支持两种格式：
+        创建 API Key。`owner` 字段需要以下二选一：
         - **新格式 (v0.5+)**：`owner_type` + `owner_id`
         - **旧格式 (v0.2-v0.4)**：`service_account_id`（向后兼容）
+
+        `scopes` 必填——空数组表示无 scope 的 Key（仍能用于存在性验证，但不能调用任何受保护接口）。
       security:
         - ServiceToken: []
       requestBody:
@@ -1262,16 +1264,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [project]
+              required: [project, scopes]
               properties:
                 owner_type:
                   type: string
                   enum: [user, service_account]
+                  description: 与 owner_id 配对使用（v0.5+）
                 owner_id:
                   type: string
+                  description: 与 owner_type 配对使用（v0.5+）
                 service_account_id:
                   type: string
-                  description: 向后兼容（v0.2-v0.4）
+                  description: 旧格式，向后兼容（v0.2-v0.4）。与 owner_type+owner_id 互斥。
                 project:
                   type: string
                   enum:
@@ -1284,9 +1288,12 @@ paths:
                   type: array
                   items:
                     type: string
+                  description: 授权 scope 列表，格式 `project:resource:action`（必填，可为空数组）
+                  minItems: 0
                 expires_at:
                   type: string
                   format: date-time
+                  nullable: true
       responses:
         "201":
           description: 创建成功。`key` 字段仅此一次返回。

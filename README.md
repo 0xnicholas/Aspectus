@@ -52,8 +52,8 @@ curl http://localhost:3100/health
 |------|------|:--:|------|
 | `/health` | GET | 无 | 健康检查 |
 | `/metrics` | GET | 无 | Prometheus 指标 |
-| `/openapi.yaml` | GET | 无 | OpenAPI 3.0 文档 |
-| `/docs` | GET | 无 | Swagger UI 交互式文档 |
+| `/openapi.yaml` | GET | 无 | OpenAPI 3.0 文档（无需认证，集成方可自服务发现） |
+| `/docs` | GET | 无 | Swagger UI 交互式文档（同上） |
 | `/introspect` | POST | Service Token | Token 自省 (RFC 7662) |
 | `/token` | POST | Service Token | 签发 JWT/Opaque access token |
 | `/token/revoke` | POST | Service Token | 吊销 API Key / Opaque token |
@@ -63,29 +63,33 @@ curl http://localhost:3100/health
 | `/logout` | POST | 无 | 吊销 refresh token |
 | `/forgot-password` | POST | 无 | 生成密码重置 token |
 | `/reset-password` | POST | 无 | 验证 token + 更新密码 |
-| `/tenants` | POST/GET | Service Token | 租户管理 |
-| `/tenants/{id}` | GET | Service Token | 租户详情 |
-| `/tenants/{id}/quotas` | PUT | Service Token | 配额配置 |
-| `/service-accounts` | POST/GET | Service Token | 服务账号 |
-| `/service-accounts/{id}` | GET | Service Token | 服务账号详情 |
-| `/users` | POST/GET | Service Token | 用户管理 |
-| `/users/{id}` | GET | Service Token | 用户详情 |
-| `/users/{id}/suspend` | PUT | Service Token | 挂起/恢复用户 |
-| `/users/{id}/scopes` | GET | Service Token | 用户有效 scope 列表 |
-| `/users/{id}/roles` | GET/POST/DELETE | Service Token | 查询/分配/移除用户角色 |
+| `/tenants` | POST/GET | **Admin** Service Token | 租户管理 |
+| `/tenants/{id}` | GET | **Admin** Service Token | 租户详情 |
+| `/tenants/{id}/quotas` | PUT | **Admin** Service Token | 配额配置 |
+| `/service-accounts` | POST/GET | **Admin** Service Token | 服务账号 |
+| `/service-accounts/{id}` | GET | **Admin** Service Token | 服务账号详情 |
+| `/users` | POST/GET | **Admin** Service Token | 用户管理 |
+| `/users/{id}` | GET | **Admin** Service Token | 用户详情 |
+| `/users/{id}/suspend` | PUT | **Admin** Service Token | 挂起/恢复用户 |
+| `/users/{id}/scopes` | GET | **Admin** Service Token | 用户有效 scope 列表 |
+| `/users/{id}/roles` | GET/POST/DELETE | **Admin** Service Token | 查询/分配/移除用户角色 |
 | `/users/{id}/change-password` | POST | 无 | 用户自助修改密码（需当前密码，受 rate limit） |
-| `/roles` | GET/POST | Service Token | 角色列表 / 创建自定义角色 |
-| `/roles/{id}` | GET/PUT/DELETE | Service Token | 角色详情 / 更新 / 删除自定义角色 |
-| `/api-keys` | POST/GET | Service Token | API Key 管理 |
-| `/api-keys/{id}` | GET/DELETE | Service Token | 查询/吊销 Key |
+| `/roles` | GET/POST | **Admin** Service Token | 角色列表 / 创建自定义角色 |
+| `/roles/{id}` | GET/PUT/DELETE | **Admin** Service Token | 角色详情 / 更新 / 删除自定义角色 |
+| `/api-keys` | POST/GET | **Admin** Service Token | API Key 管理 |
+| `/api-keys/{id}` | GET/DELETE | **Admin** Service Token | 查询/吊销 Key |
 | `/service-tokens` | POST/GET | Admin Service Token | 生态项目 Service Token 管理 |
 | `/service-tokens/{project}` | GET/DELETE | Admin Service Token | 查询/吊销 Service Token |
 | `/service-tokens/{project}/rotate` | POST | Admin Service Token | 轮换 Service Token |
 | `/audit-logs` | GET | Admin Service Token | 审计日志查询 |
 | `/authorize` | POST | 无 | OAuth2 授权 |
 | `/oauth/token` | POST | 无 | OAuth2 Token |
-| `/clients` | POST/GET | Service Token | OAuth2 Client |
+| `/clients` | POST/GET | **Admin** Service Token | OAuth2 Client |
 | `/.well-known/jwks.json` | GET | 无 | JWT 公钥 |
+
+> **认证术语**：
+> - **Service Token**：消费项目（如 Pandaria）的 service token，用于 `/introspect`、`/token`、`/token/revoke`
+> - **Admin Service Token**：`ASPECTUS_ADMIN_SERVICE_TOKEN` 环境变量配置，专门用于所有 `/tenants`、`/users`、`/api-keys` 等管理端点。**消费项目的 service token 不能调用管理端点**（见 AGENTS.md 安全约束 7）
 
 完整 API 文档见 [docs/openapi.yaml](docs/openapi.yaml)。
 
@@ -201,21 +205,46 @@ curl -X POST http://localhost:3100/register \
 **生产路径**（`ASPECTUS_REGISTRATION_ENABLED` 未设置或 = false）：
 
 ```bash
-# 1. 管理员用 Service Token 创建 tenant
+# 1. 管理员用 Admin Service Token 创建 tenant
+#    注：tenant id 由服务端自动生成 KSUID，响应中返回。
+#    name 需匹配 [a-zA-Z0-9_-]{1,128}，不含空格。
 curl -X POST http://localhost:3100/tenants \
-  -H "Authorization: Bearer $SERVICE_TOKEN" \
-  -d '{"id": "org_acme", "name": "Acme Corp"}'
+  -H "Authorization: Bearer $ADMIN_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "acme-corp"}'
+# → 201 { "id": "3FoUhlWdNrv5PQODgLCJvnFhmkY", "name": "acme-corp", ... }
 
-# 2. 管理员创建 user（包含初始密码）
+# 2. 管理员创建 service-account（API Key 的所有者）
+TENANT_ID=3FoUhlWdNrv5PQODgLCJvnFhmkY
+SA_RESP=$(curl -s -X POST http://localhost:3100/service-accounts \
+  -H "Authorization: Bearer $ADMIN_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"tenant_id\":\"$TENANT_ID\",\"label\":\"alice-bot\",\"project\":\"pandaria\"}")
+SA_ID=$(echo "$SA_RESP" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+
+# 3. 管理员创建 user（包含初始密码）
 curl -X POST http://localhost:3100/users \
-  -H "Authorization: Bearer $SERVICE_TOKEN" \
-  -d '{
-    "email": "alice@example.com",
-    "password": "Secret123",
-    "tenant_id": "org_acme"
-  }'
+  -H "Authorization: Bearer $ADMIN_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"alice@example.com\",
+    \"password\": \"Secret123\",
+    \"tenant_id\": \"$TENANT_ID\"
+  }"
 
-# 3. alice 使用两步法登录
+# 4. 管理员为 service-account 签发 API Key（scopes 必填）
+curl -X POST http://localhost:3100/api-keys \
+  -H "Authorization: Bearer $ADMIN_SERVICE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"tenant_id\": \"$TENANT_ID\",
+    \"project\": \"pandaria\",
+    \"service_account_id\": \"$SA_ID\",
+    \"scopes\": [\"pandaria:session:create\", \"pandaria:session:read\"]
+  }"
+# → 201 { "key": "pk_live_xxxxx", ... } （key 仅此一次返回）
+
+# 5. alice 使用两步法登录
 # POST /login/lookup → POST /login（见下节）
 ```
 

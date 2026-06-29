@@ -298,12 +298,13 @@ async fn main() -> anyhow::Result<()> {
         .with_state(state.clone());
 
     // Public + introspect routes (with per-route rate limiting)
+    //
+    // Order matters: routes added BEFORE `.route_layer(auth_layer)` are
+    // service-token authenticated; routes added AFTER are public. The
+    // /openapi.yaml and /docs routes are added AFTER the auth layer so
+    // external integrators can browse the API spec without a token
+    // (consistent with JWKS being public).
     let app = Router::new()
-        .route(
-            "/openapi.yaml",
-            get(aspectus_server::routes::docs::openapi_spec),
-        )
-        .route("/docs", get(aspectus_server::routes::docs::swagger_ui))
         .route(
             "/token/revoke",
             post(aspectus_server::routes::token::revoke).route_layer(middleware::from_fn(
@@ -330,6 +331,13 @@ async fn main() -> anyhow::Result<()> {
             )),
         )
         .route_layer(auth_layer)
+        // Public documentation endpoints — no auth required so that
+        // external integrators can self-serve discover the API.
+        .route(
+            "/openapi.yaml",
+            get(aspectus_server::routes::docs::openapi_spec),
+        )
+        .route("/docs", get(aspectus_server::routes::docs::swagger_ui))
         .route("/health", get(aspectus_server::routes::health::handle))
         .route("/metrics", get(aspectus_server::routes::metrics::handle))
         .route(
